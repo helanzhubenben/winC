@@ -36,9 +36,17 @@ backend/
 ### 1. 创建虚拟环境（推荐）
 
 ```bash
-cd E:\Workplace\Project\winC\backend
-python -m venv venv
-venv\Scripts\activate
+# 进入后端目录
+cd backend
+
+# 创建虚拟环境
+python -m venv .venv
+
+# Windows 激活
+.venv\Scripts\activate
+
+# Linux/Mac 激活
+source .venv/bin/activate
 ```
 
 ### 2. 安装依赖
@@ -49,13 +57,19 @@ pip install -r requirements.txt
 
 ### 3. 配置数据库
 
-在MySQL中创建数据库：
+**开发环境（推荐使用 SQLite）**
+
+默认配置已使用 SQLite，无需额外配置。数据库文件会自动创建在 `backend/db.sqlite3`。
+
+**生产环境（可选使用 MySQL）**
+
+如需使用 MySQL，请先在 MySQL 中创建数据库：
 
 ```sql
 CREATE DATABASE fishpool_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-修改 `fishpool/settings.py` 中的数据库配置：
+然后修改 `fishpool/settings.py` 中的数据库配置，注释掉 SQLite 配置，取消注释 MySQL 配置：
 
 ```python
 DATABASES = {
@@ -66,6 +80,10 @@ DATABASES = {
         'PASSWORD': 'your_password',  # 修改为你的MySQL密码
         'HOST': 'localhost',
         'PORT': '3306',
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+        }
     }
 }
 ```
@@ -82,6 +100,8 @@ python manage.py migrate
 ```bash
 python manage.py createsuperuser
 ```
+
+按提示输入用户名、邮箱和密码。
 
 ### 6. 运行开发服务器
 
