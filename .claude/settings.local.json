@@ -19,7 +19,12 @@
       "Bash(netstat -ano)",
       "Bash(.venv/Scripts/python.exe manage.py runserver)",
       "Bash(ls:*)",
-      "Bash(pkill -f \"python.*manage.py runserver\")"
+      "Bash(pkill -f \"python.*manage.py runserver\")",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)"
     ]
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true
   }
 }
