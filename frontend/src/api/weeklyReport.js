@@ -27,17 +27,37 @@ export function deleteWeeklyReport(id) {
   return axios.delete(`${API_BASE_URL}/weekly-reports/${id}/`)
 }
 
-// 添加行动记录
+// 获取行动记录列表
+export function getWeeklyReportActions(reportId) {
+  return axios.get(`${API_BASE_URL}/weekly-reports/${reportId}/actions/`)
+}
+
+// 创建行动记录
+export function createWeeklyReportAction(reportId, data) {
+  return axios.post(`${API_BASE_URL}/weekly-reports/${reportId}/actions/`, data)
+}
+
+// 更新行动记录
+export function updateWeeklyReportAction(reportId, actionId, data) {
+  return axios.put(`${API_BASE_URL}/weekly-reports/${reportId}/actions/${actionId}/`, data)
+}
+
+// 删除行动记录
+export function deleteWeeklyReportAction(reportId, actionId) {
+  return axios.delete(`${API_BASE_URL}/weekly-reports/${reportId}/actions/${actionId}/`)
+}
+
+// 添加行动记录（旧方法，保留兼容性）
 export function addAction(reportId, data) {
   return axios.post(`${API_BASE_URL}/weekly-reports/${reportId}/add-action/`, data)
 }
 
-// 更新行动记录
+// 更新行动记录（旧方法，保留兼容性）
 export function updateAction(reportId, index, data) {
   return axios.post(`${API_BASE_URL}/weekly-reports/${reportId}/actions/${index}/update/`, data)
 }
 
-// 删除行动记录
+// 删除行动记录（旧方法，保留兼容性）
 export function deleteAction(reportId, index) {
   return axios.post(`${API_BASE_URL}/weekly-reports/${reportId}/actions/${index}/delete/`)
 }

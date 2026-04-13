@@ -113,6 +113,116 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
             queryset = queryset.select_related('customer')
         return queryset
 
+    @action(detail=True, methods=['get', 'post'], url_path='actions')
+    def actions_list(self, request, pk=None):
+        """获取或创建行动记录"""
+        report = self.get_object()
+
+        if request.method == 'GET':
+            # 获取行动记录列表
+            actions_with_id = []
+            if report.actions:
+                for index, action in enumerate(report.actions):
+                    action_data = {
+                        'id': index,
+                        'action_date': action.get('action_date', ''),
+                        'action': action.get('action', action.get('content', '')),  # 兼容旧格式
+                        'result': action.get('result', ''),
+                        'next_step': action.get('next_step', ''),
+                        'timestamp': action.get('timestamp', ''),
+                        'user': action.get('user', '')
+                    }
+                    actions_with_id.append(action_data)
+            return Response(actions_with_id)
+
+        elif request.method == 'POST':
+            # 创建行动记录
+            action_date = request.data.get('action_date', '').strip()
+            action_content = request.data.get('action', '').strip()
+            result = request.data.get('result', '').strip()
+            next_step = request.data.get('next_step', '').strip()
+
+            if not action_content:
+                return Response(
+                    {'error': '行动内容不能为空'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # 创建新的行动记录
+            action_record = {
+                'timestamp': timezone.now().isoformat(),
+                'action_date': action_date,
+                'action': action_content,
+                'result': result,
+                'next_step': next_step
+            }
+
+            # 添加到 actions 列表
+            if report.actions is None:
+                report.actions = []
+            report.actions.append(action_record)
+            report.save()
+
+            # 返回新创建的记录（带 id）
+            new_action = {
+                'id': len(report.actions) - 1,
+                **action_record
+            }
+            return Response(new_action, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['put', 'delete'], url_path='actions/(?P<action_id>[0-9]+)')
+    def actions_detail(self, request, pk=None, action_id=None):
+        """更新或删除行动记录（RESTful 风格）"""
+        report = self.get_object()
+        try:
+            action_id = int(action_id)
+        except (ValueError, TypeError):
+            return Response(
+                {'error': '无效的行动记录 ID'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not report.actions or action_id >= len(report.actions):
+            return Response(
+                {'error': '行动记录不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if request.method == 'PUT':
+            # 更新行动记录
+            action_date = request.data.get('action_date', '').strip()
+            action_content = request.data.get('action', '').strip()
+            result = request.data.get('result', '').strip()
+            next_step = request.data.get('next_step', '').strip()
+
+            if not action_content:
+                return Response(
+                    {'error': '行动内容不能为空'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # 更新行动记录（保留原始时间戳）
+            report.actions[action_id].update({
+                'action_date': action_date,
+                'action': action_content,
+                'result': result,
+                'next_step': next_step
+            })
+            report.save()
+
+            # 返回更新后的记录
+            updated_action = {
+                'id': action_id,
+                **report.actions[action_id]
+            }
+            return Response(updated_action)
+
+        elif request.method == 'DELETE':
+            # 删除行动记录
+            report.actions.pop(action_id)
+            report.save()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
     @action(detail=True, methods=['post'], url_path='add-action')
     def add_action(self, request, pk=None):
         """添加行动记录"""

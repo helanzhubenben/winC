@@ -2,6 +2,15 @@ from rest_framework import serializers
 from .models import Customer, Contact, WeeklyReport
 
 
+class BlankableDateField(serializers.DateField):
+    """Treat blank strings from forms as null for optional date fields."""
+
+    def to_internal_value(self, value):
+        if value in ('', None):
+            return None
+        return super().to_internal_value(value)
+
+
 class ContactSerializer(serializers.ModelSerializer):
     """联系人序列化器"""
 
@@ -92,6 +101,9 @@ class CustomerListSerializer(serializers.ModelSerializer):
 class WeeklyReportSerializer(serializers.ModelSerializer):
     """Weekly Report 序列化器"""
 
+    due_date = BlankableDateField(required=False, allow_null=True)
+    revise_date = BlankableDateField(required=False, allow_null=True)
+    finish_date = BlankableDateField(required=False, allow_null=True)
     customer_name = serializers.CharField(source='customer.client_name', read_only=True)
     actions_count = serializers.SerializerMethodField()
 
@@ -190,4 +202,3 @@ class WeeklyReportListSerializer(serializers.ModelSerializer):
     def get_actions_count(self, obj):
         """获取行动记录数量"""
         return len(obj.actions) if obj.actions else 0
-
