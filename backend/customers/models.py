@@ -108,6 +108,11 @@ class Contact(models.Model):
 class WeeklyReport(models.Model):
     """Weekly Report 项目跟进记录模型"""
 
+    STATUS_CHOICES = [
+        ('in_progress', '进行中'),
+        ('completed', '已完成'),
+    ]
+
     # 客户信息（弱关联）
     client_name = models.CharField(
         max_length=200,
@@ -129,6 +134,15 @@ class WeeklyReport(models.Model):
     address = models.CharField(max_length=500, blank=True, verbose_name='地址')
     tasks = models.CharField(max_length=200, blank=True, verbose_name='任务类型', db_index=True)
     definition = models.TextField(verbose_name='项目定义/名称')
+
+    # 项目状态
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='in_progress',
+        verbose_name='项目状态',
+        db_index=True
+    )
 
     # 时间信息
     due_date = models.DateField(null=True, blank=True, verbose_name='截止日期', db_index=True)
@@ -164,6 +178,7 @@ class WeeklyReport(models.Model):
             models.Index(fields=['tasks']),
             models.Index(fields=['responsibility']),
             models.Index(fields=['due_date']),
+            models.Index(fields=['status']),
         ]
 
     def __str__(self):

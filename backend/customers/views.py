@@ -95,7 +95,7 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
     queryset = WeeklyReport.objects.all()
     serializer_class = WeeklyReportSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['client_name', 'area', 'tasks', 'responsibility', 'customer']
+    filterset_fields = ['client_name', 'area', 'tasks', 'responsibility', 'customer', 'status']
     search_fields = ['client_name', 'definition', 'remark']
     ordering_fields = ['due_date', 'created_at', 'updated_at']
     ordering = ['-due_date', '-created_at']

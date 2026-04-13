@@ -22,6 +22,11 @@ export function updateWeeklyReport(id, data) {
   return axios.put(`${API_BASE_URL}/weekly-reports/${id}/`, data)
 }
 
+// 部分更新 Weekly Report（PATCH）
+export function patchWeeklyReport(id, data) {
+  return axios.patch(`${API_BASE_URL}/weekly-reports/${id}/`, data)
+}
+
 // 删除 Weekly Report
 export function deleteWeeklyReport(id) {
   return axios.delete(`${API_BASE_URL}/weekly-reports/${id}/`)

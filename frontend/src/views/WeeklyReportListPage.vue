@@ -1,11 +1,23 @@
 <template>
   <div class="weekly-report-list">
     <el-card class="toolbar-card" shadow="never">
+      <!-- 状态筛选标签 -->
+      <el-row :gutter="16" style="margin-bottom: 16px">
+        <el-col :span="24">
+          <el-radio-group v-model="searchParams.status" @change="handleSearch">
+            <el-radio-button label="">全部</el-radio-button>
+            <el-radio-button label="in_progress">进行中</el-radio-button>
+            <el-radio-button label="completed">已完成</el-radio-button>
+          </el-radio-group>
+        </el-col>
+      </el-row>
+
+      <!-- 搜索和筛选 -->
       <el-row :gutter="16">
-        <el-col :xs="24" :sm="12" :md="6">
+        <el-col :xs="24" :sm="12" :md="5">
           <el-input
             v-model="searchParams.search"
-            placeholder="搜索客户名称、任务"
+            placeholder="搜索客户名称、项目定义"
             clearable
             @clear="handleSearch"
             @keyup.enter="handleSearch"
@@ -15,7 +27,7 @@
             </template>
           </el-input>
         </el-col>
-        <el-col :xs="12" :sm="6" :md="4">
+        <el-col :xs="12" :sm="6" :md="3">
           <el-input
             v-model="searchParams.area"
             placeholder="区域"
@@ -24,7 +36,16 @@
             @keyup.enter="handleSearch"
           />
         </el-col>
-        <el-col :xs="12" :sm="6" :md="4">
+        <el-col :xs="12" :sm="6" :md="3">
+          <el-input
+            v-model="searchParams.tasks"
+            placeholder="任务类型"
+            clearable
+            @clear="handleSearch"
+            @keyup.enter="handleSearch"
+          />
+        </el-col>
+        <el-col :xs="12" :sm="6" :md="3">
           <el-input
             v-model="searchParams.responsibility"
             placeholder="责任人"
@@ -33,13 +54,14 @@
             @keyup.enter="handleSearch"
           />
         </el-col>
-        <el-col :xs="12" :sm="6" :md="4">
+        <el-col :xs="12" :sm="6" :md="5">
           <el-button type="primary" @click="handleSearch">
             <el-icon><Search /></el-icon>
             搜索
           </el-button>
+          <el-button @click="handleReset">重置</el-button>
         </el-col>
-        <el-col :xs="12" :sm="6" :md="4" style="text-align: right">
+        <el-col :xs="12" :sm="6" :md="5" style="text-align: right">
           <el-button type="primary" @click="handleCreate">
             <el-icon><Plus /></el-icon>
             新建报告
@@ -61,14 +83,30 @@
             @row-click="handleRowClick"
             @current-change="handleCurrentChange"
           >
-            <el-table-column prop="client_name" label="客户名称" min-width="150" />
+            <el-table-column prop="client_name" label="客户名称" min-width="130" />
             <el-table-column prop="area" label="区域" width="100" />
-            <el-table-column prop="tasks" label="任务" min-width="180" show-overflow-tooltip />
-            <el-table-column prop="due_date" label="到期日期" width="110" />
-            <el-table-column prop="responsibility" label="责任人" width="100" />
-            <el-table-column prop="actions_count" label="行动记录" width="90" align="center" />
-            <el-table-column label="操作" width="150" fixed="right">
+            <el-table-column prop="tasks" label="任务" min-width="120" show-overflow-tooltip />
+            <el-table-column prop="definition" label="项目定义" min-width="150" show-overflow-tooltip />
+            <el-table-column prop="status" label="状态" width="90" align="center">
               <template #default="{ row }">
+                <el-tag :type="row.status === 'completed' ? 'success' : 'warning'" size="small">
+                  {{ row.status === 'completed' ? '已完成' : '进行中' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="due_date" label="到期日期" width="110" />
+            <el-table-column prop="responsibility" label="责任人" width="90" />
+            <el-table-column prop="actions_count" label="行动" width="70" align="center" />
+            <el-table-column label="操作" width="180" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  link
+                  :type="row.status === 'completed' ? 'warning' : 'success'"
+                  size="small"
+                  @click.stop="handleToggleStatus(row)"
+                >
+                  {{ row.status === 'completed' ? '进行中' : '完成' }}
+                </el-button>
                 <el-button link type="primary" size="small" @click.stop="handleEdit(row)">
                   编辑
                 </el-button>
@@ -158,7 +196,7 @@
     <!-- 添加/编辑行动对话框 -->
     <el-dialog
       v-model="actionDialogVisible"
-      :title="actionForm.id ? '编辑行动' : '添加行动'"
+      :title="actionForm.id !== null ? '编辑行动' : '添加行动'"
       width="600px"
     >
       <el-form ref="actionFormRef" :model="actionForm" :rules="actionRules" label-width="100px">
@@ -177,7 +215,7 @@
           <el-input
             v-model="actionForm.action"
             type="textarea"
-            :rows="4"
+            :rows="3"
             placeholder="请输入行动内容"
           />
         </el-form-item>
@@ -186,8 +224,8 @@
           <el-input
             v-model="actionForm.result"
             type="textarea"
-            :rows="3"
-            placeholder="请输入行动结果"
+            :rows="2"
+            placeholder="请输入结果"
           />
         </el-form-item>
 
@@ -217,6 +255,8 @@ import { Search, Plus } from '@element-plus/icons-vue'
 import {
   getWeeklyReports,
   deleteWeeklyReport,
+  updateWeeklyReport,
+  patchWeeklyReport,
   getWeeklyReportActions,
   createWeeklyReportAction,
   updateWeeklyReportAction,
@@ -234,7 +274,9 @@ const pageSize = ref(20)
 const searchParams = ref({
   search: '',
   area: '',
-  responsibility: ''
+  tasks: '',
+  responsibility: '',
+  status: ''
 })
 
 // 选中的报告和行动记录
@@ -303,6 +345,17 @@ const handleSearch = () => {
   loadReports()
 }
 
+const handleReset = () => {
+  searchParams.value = {
+    search: '',
+    area: '',
+    tasks: '',
+    responsibility: '',
+    status: ''
+  }
+  handleSearch()
+}
+
 const handlePageChange = () => {
   loadReports()
 }
@@ -329,6 +382,25 @@ const handleCurrentChange = (currentRow) => {
   if (currentRow) {
     selectedReport.value = currentRow
     loadActions(currentRow.id)
+  }
+}
+
+const handleToggleStatus = async (row) => {
+  try {
+    const newStatus = row.status === 'completed' ? 'in_progress' : 'completed'
+    const statusText = newStatus === 'completed' ? '已完成' : '进行中'
+
+    await patchWeeklyReport(row.id, { status: newStatus })
+    ElMessage.success(`已标记为${statusText}`)
+    loadReports()
+
+    // 如果是当前选中的报告，更新选中状态
+    if (selectedReport.value && selectedReport.value.id === row.id) {
+      selectedReport.value.status = newStatus
+    }
+  } catch (error) {
+    ElMessage.error('更新状态失败')
+    console.error(error)
   }
 }
 
@@ -388,7 +460,7 @@ const handleSaveAction = async () => {
   try {
     await actionFormRef.value.validate()
 
-    if (actionForm.value.id) {
+    if (actionForm.value.id !== null) {
       // 更新
       await updateWeeklyReportAction(
         selectedReport.value.id,
@@ -442,17 +514,6 @@ const formatDate = (date) => {
   return new Date(date).toLocaleDateString('zh-CN')
 }
 
-const formatDateTime = (dateTime) => {
-  if (!dateTime) return ''
-  return new Date(dateTime).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
-
 onMounted(() => {
   loadReports()
 })
@@ -468,7 +529,7 @@ onMounted(() => {
 }
 
 .content-row {
-  min-height: calc(100vh - 200px);
+  min-height: calc(100vh - 250px);
 }
 
 .table-card {
@@ -477,7 +538,7 @@ onMounted(() => {
 
 .action-card {
   min-height: 600px;
-  max-height: calc(100vh - 200px);
+  max-height: calc(100vh - 250px);
   overflow-y: auto;
 }
 
@@ -497,7 +558,7 @@ onMounted(() => {
 }
 
 .actions-list {
-  max-height: calc(100vh - 320px);
+  max-height: calc(100vh - 370px);
   overflow-y: auto;
 }
 

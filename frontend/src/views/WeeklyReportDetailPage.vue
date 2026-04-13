@@ -48,6 +48,13 @@
               />
             </el-form-item>
 
+            <el-form-item label="项目状态" prop="status">
+              <el-radio-group v-model="form.status">
+                <el-radio label="in_progress">进行中</el-radio>
+                <el-radio label="completed">已完成</el-radio>
+              </el-radio-group>
+            </el-form-item>
+
             <el-form-item label="到期日期" prop="due_date">
               <el-date-picker
                 v-model="form.due_date"
@@ -198,6 +205,7 @@ const form = reactive({
   address: '',
   tasks: '',
   definition: '',
+  status: 'in_progress',
   due_date: '',
   revise_date: '',
   finish_date: '',
