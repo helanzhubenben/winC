@@ -31,7 +31,7 @@
         </el-col>
         <el-col :xs="12" :sm="6" :md="4">
           <el-input
-            v-model="searchParams.region"
+            v-model="searchParams.area"
             placeholder="区域"
             clearable
             @clear="handleSearch"
@@ -159,7 +159,7 @@ const currentCustomer = ref(null)
 const searchParams = ref({
   search: '',
   level: '',
-  region: '',
+  area: '',
   city: '',
   business_model: '',
   page: 1,

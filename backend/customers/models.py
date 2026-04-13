@@ -104,3 +104,68 @@ class Contact(models.Model):
     def __str__(self):
         return f"{self.name} - {self.customer.client_name}"
 
+
+class WeeklyReport(models.Model):
+    """Weekly Report 项目跟进记录模型"""
+
+    # 客户信息（弱关联）
+    client_name = models.CharField(
+        max_length=200,
+        db_index=True,
+        verbose_name='客户名称',
+        help_text='手动输入或从客户列表选择'
+    )
+    customer = models.ForeignKey(
+        Customer,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='weekly_reports',
+        verbose_name='关联客户'
+    )
+
+    # 项目基本信息
+    area = models.CharField(max_length=100, blank=True, verbose_name='区域', db_index=True)
+    address = models.CharField(max_length=500, blank=True, verbose_name='地址')
+    tasks = models.CharField(max_length=200, blank=True, verbose_name='任务类型', db_index=True)
+    definition = models.TextField(verbose_name='项目定义/名称')
+
+    # 时间信息
+    due_date = models.DateField(null=True, blank=True, verbose_name='截止日期', db_index=True)
+    revise_date = models.DateField(null=True, blank=True, verbose_name='修订日期')
+    finish_date = models.DateField(null=True, blank=True, verbose_name='完成日期')
+
+    # 营收和责任人
+    revenue = models.CharField(max_length=100, blank=True, verbose_name='营收')
+    responsibility = models.CharField(max_length=100, blank=True, verbose_name='责任人', db_index=True)
+
+    # 行动记录（JSON 存储）
+    actions = models.JSONField(
+        default=list,
+        verbose_name='行动记录',
+        help_text='格式: [{"timestamp": "2026-04-12T10:30:00", "content": "...", "user": "..."}]'
+    )
+
+    # 备注
+    remark = models.TextField(blank=True, verbose_name='备注')
+
+    # 系统字段
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'weekly_reports'
+        verbose_name = 'Weekly Report'
+        verbose_name_plural = 'Weekly Reports'
+        ordering = ['-due_date', '-created_at']
+        indexes = [
+            models.Index(fields=['client_name']),
+            models.Index(fields=['area']),
+            models.Index(fields=['tasks']),
+            models.Index(fields=['responsibility']),
+            models.Index(fields=['due_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.client_name} - {self.definition[:50]}"
+

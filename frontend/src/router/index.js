@@ -1,6 +1,8 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import CustomerList from '../views/CustomerListPage.vue'
 import CustomerDetail from '../views/CustomerDetailPage.vue'
+import WeeklyReportList from '../views/WeeklyReportListPage.vue'
+import WeeklyReportDetail from '../views/WeeklyReportDetailPage.vue'
 
 const routes = [
   {
@@ -16,6 +18,16 @@ const routes = [
     path: '/customers/:id',
     name: 'CustomerDetail',
     component: CustomerDetail
+  },
+  {
+    path: '/weekly-reports',
+    name: 'WeeklyReportList',
+    component: WeeklyReportList
+  },
+  {
+    path: '/weekly-reports/:id',
+    name: 'WeeklyReportDetail',
+    component: WeeklyReportDetail
   }
 ]
 

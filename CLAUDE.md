@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 通用要求
+- 代码注释以函数为单位进行注释，注释必须清晰。
+- 代码文件开头必须由代码总体描述注释
+
+
 ## 项目概述
 
 这是一个 **Fishpool 客户池管理系统**，用于 B2B 销售团队管理客户关系。系统采用前后端分离架构，实现客户三维评分（客户潜力、竞争环境、关键人关系）和自动分级功能。

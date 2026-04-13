@@ -42,7 +42,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { createContact, updateContact } from '../api/contact'
+import { createContact, updateContact } from '../api/contactApi'
 
 const props = defineProps({
   visible: {
@@ -133,4 +133,3 @@ const handleSubmit = async () => {
   }
 }
 </script>
-

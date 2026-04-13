@@ -40,7 +40,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { createContact, updateContact } from '../api/contactService'
+import { createContact, updateContact } from '../api/contactApi'
 
 const emptyForm = () => ({
   name: '',

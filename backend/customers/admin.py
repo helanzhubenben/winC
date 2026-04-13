@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Customer, Contact
+from .models import Customer, Contact, WeeklyReport
 
 
 @admin.register(Customer)
@@ -52,3 +52,43 @@ class ContactAdmin(admin.ModelAdmin):
     list_filter = ['is_key_person', 'customer']
     search_fields = ['name', 'position', 'phone', 'email']
     ordering = ['-created_at']
+
+
+@admin.register(WeeklyReport)
+class WeeklyReportAdmin(admin.ModelAdmin):
+    """Weekly Report 管理后台"""
+
+    list_display = [
+        'client_name',
+        'definition',
+        'area',
+        'tasks',
+        'due_date',
+        'responsibility',
+        'customer',
+        'updated_at'
+    ]
+    list_filter = ['area', 'tasks', 'responsibility', 'due_date']
+    search_fields = ['client_name', 'definition', 'remark']
+    ordering = ['-due_date', '-updated_at']
+    list_per_page = 20
+    raw_id_fields = ['customer']
+
+    fieldsets = (
+        ('客户信息', {
+            'fields': ('client_name', 'customer', 'area', 'address')
+        }),
+        ('项目信息', {
+            'fields': ('tasks', 'definition', 'revenue', 'responsibility')
+        }),
+        ('时间信息', {
+            'fields': ('due_date', 'revise_date', 'finish_date')
+        }),
+        ('行动记录', {
+            'fields': ('actions',),
+            'classes': ('collapse',)
+        }),
+        ('其他信息', {
+            'fields': ('remark',)
+        }),
+    )

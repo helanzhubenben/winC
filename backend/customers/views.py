@@ -1,9 +1,13 @@
-from rest_framework import viewsets, filters
+from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from .models import Customer, Contact
-from .serializers import CustomerSerializer, CustomerListSerializer, ContactSerializer
+from django.utils import timezone
+from .models import Customer, Contact, WeeklyReport
+from .serializers import (
+    CustomerSerializer, CustomerListSerializer, ContactSerializer,
+    WeeklyReportSerializer, WeeklyReportListSerializer
+)
 
 
 class CustomerViewSet(viewsets.ModelViewSet):
@@ -61,12 +65,21 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
         return Response(stats)
 
+    @action(detail=True, methods=['get'], url_path='weekly-reports')
+    def weekly_reports(self, request, pk=None):
+        """获取客户的所有 Weekly Report"""
+        customer = self.get_object()
+        reports = customer.weekly_reports.all().order_by('-due_date', '-created_at')
+        serializer = WeeklyReportListSerializer(reports, many=True)
+        return Response(serializer.data)
+
 
 class ContactViewSet(viewsets.ModelViewSet):
     """联系人视图集"""
 
     queryset = Contact.objects.all()
     serializer_class = ContactSerializer
+    pagination_class = None
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['customer', 'is_key_person']
     search_fields = ['name', 'position', 'phone', 'email']
@@ -75,3 +88,117 @@ class ContactViewSet(viewsets.ModelViewSet):
         """优化查询性能"""
         return super().get_queryset().select_related('customer')
 
+
+class WeeklyReportViewSet(viewsets.ModelViewSet):
+    """Weekly Report 视图集"""
+
+    queryset = WeeklyReport.objects.all()
+    serializer_class = WeeklyReportSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['client_name', 'area', 'tasks', 'responsibility', 'customer']
+    search_fields = ['client_name', 'definition', 'remark']
+    ordering_fields = ['due_date', 'created_at', 'updated_at']
+    ordering = ['-due_date', '-created_at']
+
+    def get_serializer_class(self):
+        """根据 action 选择序列化器"""
+        if self.action == 'list':
+            return WeeklyReportListSerializer
+        return WeeklyReportSerializer
+
+    def get_queryset(self):
+        """优化查询性能"""
+        queryset = super().get_queryset()
+        if self.action in ['list', 'retrieve']:
+            queryset = queryset.select_related('customer')
+        return queryset
+
+    @action(detail=True, methods=['post'], url_path='add-action')
+    def add_action(self, request, pk=None):
+        """添加行动记录"""
+        report = self.get_object()
+        content = request.data.get('content', '').strip()
+        user = request.data.get('user', '').strip()
+
+        if not content:
+            return Response(
+                {'error': '行动记录内容不能为空'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 创建新的行动记录
+        action_record = {
+            'timestamp': timezone.now().isoformat(),
+            'content': content,
+            'user': user
+        }
+
+        # 添加到 actions 列表
+        if report.actions is None:
+            report.actions = []
+        report.actions.append(action_record)
+        report.save()
+
+        serializer = self.get_serializer(report)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='actions/(?P<index>[0-9]+)/update')
+    def update_action(self, request, pk=None, index=None):
+        """编辑行动记录"""
+        report = self.get_object()
+        try:
+            index = int(index)
+        except (ValueError, TypeError):
+            return Response(
+                {'error': '无效的索引'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not report.actions or index >= len(report.actions):
+            return Response(
+                {'error': '行动记录不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        content = request.data.get('content', '').strip()
+        user = request.data.get('user', '').strip()
+
+        if not content:
+            return Response(
+                {'error': '行动记录内容不能为空'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 更新行动记录（保留原始时间戳）
+        report.actions[index]['content'] = content
+        if user:
+            report.actions[index]['user'] = user
+        report.save()
+
+        serializer = self.get_serializer(report)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='actions/(?P<index>[0-9]+)/delete')
+    def delete_action(self, request, pk=None, index=None):
+        """删除行动记录"""
+        report = self.get_object()
+        try:
+            index = int(index)
+        except (ValueError, TypeError):
+            return Response(
+                {'error': '无效的索引'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not report.actions or index >= len(report.actions):
+            return Response(
+                {'error': '行动记录不存在'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # 删除行动记录
+        report.actions.pop(index)
+        report.save()
+
+        serializer = self.get_serializer(report)
+        return Response(serializer.data)

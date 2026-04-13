@@ -6,6 +6,19 @@
           <h1>Fishpool 客户池管理系统</h1>
           <p>客户信息、评分和联系人统一管理</p>
         </div>
+        <el-menu
+          :default-active="activeMenu"
+          mode="horizontal"
+          :ellipsis="false"
+          background-color="transparent"
+          text-color="#fff"
+          active-text-color="#ffd04b"
+          class="header-menu"
+          @select="handleMenuSelect"
+        >
+          <el-menu-item index="/customers">客户管理</el-menu-item>
+          <el-menu-item index="/weekly-reports">周报管理</el-menu-item>
+        </el-menu>
       </el-header>
       <el-main class="app-main">
         <RouterView />
@@ -15,7 +28,29 @@
 </template>
 
 <script setup>
-import { RouterView } from 'vue-router'
+import { ref, watch } from 'vue'
+import { RouterView, useRouter, useRoute } from 'vue-router'
+
+const router = useRouter()
+const route = useRoute()
+
+const activeMenu = ref('/customers')
+
+watch(
+  () => route.path,
+  (newPath) => {
+    if (newPath.startsWith('/weekly-reports')) {
+      activeMenu.value = '/weekly-reports'
+    } else if (newPath.startsWith('/customers')) {
+      activeMenu.value = '/customers'
+    }
+  },
+  { immediate: true }
+)
+
+const handleMenuSelect = (index) => {
+  router.push(index)
+}
 </script>
 
 <style scoped>
@@ -30,6 +65,7 @@ import { RouterView } from 'vue-router'
 .app-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   min-height: 88px;
   height: auto;
   padding: 20px 24px;
@@ -53,17 +89,40 @@ import { RouterView } from 'vue-router'
   font-size: 14px;
 }
 
+.header-menu {
+  border: none;
+}
+
+.header-menu :deep(.el-menu-item) {
+  border-bottom: 2px solid transparent;
+}
+
+.header-menu :deep(.el-menu-item:hover) {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.header-menu :deep(.el-menu-item.is-active) {
+  border-bottom-color: #ffd04b;
+}
+
 .app-main {
   padding: 24px;
 }
 
 @media (max-width: 768px) {
   .app-header {
+    flex-direction: column;
+    align-items: flex-start;
     padding: 18px 16px;
   }
 
   .header-content h1 {
     font-size: 22px;
+  }
+
+  .header-menu {
+    width: 100%;
+    margin-top: 12px;
   }
 
   .app-main {

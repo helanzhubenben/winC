@@ -135,7 +135,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { deleteCustomer, getCustomer } from '../api/customer'
-import { deleteContact, getContacts } from '../api/contactService'
+import { deleteContact, getContacts } from '../api/contactApi'
 import CustomerDialog from '../components/CustomerDialog.vue'
 import ContactDialog from '../components/ContactDialog.vue'
 

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Customer, Contact
+from .models import Customer, Contact, WeeklyReport
 
 
 class ContactSerializer(serializers.ModelSerializer):
@@ -87,4 +87,107 @@ class CustomerListSerializer(serializers.ModelSerializer):
 
     def get_contacts_count(self, obj):
         return obj.contacts.count()
+
+
+class WeeklyReportSerializer(serializers.ModelSerializer):
+    """Weekly Report 序列化器"""
+
+    customer_name = serializers.CharField(source='customer.client_name', read_only=True)
+    actions_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WeeklyReport
+        fields = [
+            'id',
+            'client_name',
+            'customer',
+            'customer_name',
+            'area',
+            'address',
+            'tasks',
+            'definition',
+            'due_date',
+            'revise_date',
+            'finish_date',
+            'revenue',
+            'actions',
+            'actions_count',
+            'responsibility',
+            'remark',
+            'created_at',
+            'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'customer_name', 'actions_count']
+
+    def get_actions_count(self, obj):
+        """获取行动记录数量"""
+        return len(obj.actions) if obj.actions else 0
+
+    def validate_client_name(self, value):
+        """验证客户名称不能为空"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("客户名称不能为空")
+        return value.strip()
+
+    def create(self, validated_data):
+        """创建时自动匹配客户"""
+        client_name = validated_data.get('client_name', '').strip()
+        if client_name and not validated_data.get('customer'):
+            # 尝试自动匹配客户
+            customer = self._match_customer(client_name)
+            if customer:
+                validated_data['customer'] = customer
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        """更新时自动匹配客户"""
+        client_name = validated_data.get('client_name')
+        if client_name:
+            client_name = client_name.strip()
+            validated_data['client_name'] = client_name
+            # 如果客户名称变化，重新匹配
+            if client_name != instance.client_name:
+                customer = self._match_customer(client_name)
+                validated_data['customer'] = customer
+        return super().update(instance, validated_data)
+
+    def _match_customer(self, client_name):
+        """自动匹配客户（模糊匹配）"""
+        from django.db.models import Q
+        # 去除空格，不区分大小写
+        normalized_name = client_name.replace(' ', '').lower()
+        customers = Customer.objects.filter(
+            Q(client_name__iexact=client_name) |
+            Q(client_name__icontains=client_name)
+        )
+        for customer in customers:
+            if customer.client_name.replace(' ', '').lower() == normalized_name:
+                return customer
+        return None
+
+
+class WeeklyReportListSerializer(serializers.ModelSerializer):
+    """Weekly Report 列表序列化器（简化版）"""
+
+    customer_name = serializers.CharField(source='customer.client_name', read_only=True)
+    actions_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WeeklyReport
+        fields = [
+            'id',
+            'client_name',
+            'customer_name',
+            'area',
+            'tasks',
+            'definition',
+            'due_date',
+            'responsibility',
+            'actions_count',
+            'updated_at'
+        ]
+
+    def get_actions_count(self, obj):
+        """获取行动记录数量"""
+        return len(obj.actions) if obj.actions else 0
 
