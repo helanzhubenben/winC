@@ -107,10 +107,20 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
         return WeeklyReportSerializer
 
     def get_queryset(self):
-        """优化查询性能"""
+        """优化查询性能，支持日期范围筛选"""
         queryset = super().get_queryset()
         if self.action in ['list', 'retrieve']:
             queryset = queryset.select_related('customer')
+
+        # 日期范围筛选
+        due_date_after = self.request.query_params.get('due_date_after')
+        due_date_before = self.request.query_params.get('due_date_before')
+
+        if due_date_after:
+            queryset = queryset.filter(due_date__gte=due_date_after)
+        if due_date_before:
+            queryset = queryset.filter(due_date__lte=due_date_before)
+
         return queryset
 
     @action(detail=True, methods=['get', 'post'], url_path='actions')

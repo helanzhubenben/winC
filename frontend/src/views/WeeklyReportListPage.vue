@@ -13,7 +13,7 @@
       </el-row>
 
       <!-- 搜索和筛选 -->
-      <el-row :gutter="16">
+      <el-row :gutter="16" style="margin-bottom: 12px">
         <el-col :xs="24" :sm="12" :md="5">
           <el-input
             v-model="searchParams.search"
@@ -54,14 +54,29 @@
             @keyup.enter="handleSearch"
           />
         </el-col>
-        <el-col :xs="12" :sm="6" :md="5">
+        <el-col :xs="24" :sm="12" :md="6">
+          <el-date-picker
+            v-model="dateRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            format="YYYY-MM-DD"
+            value-format="YYYY-MM-DD"
+            @change="handleDateRangeChange"
+            style="width: 100%"
+          />
+        </el-col>
+        <el-col :xs="12" :sm="6" :md="4">
           <el-button type="primary" @click="handleSearch">
             <el-icon><Search /></el-icon>
             搜索
           </el-button>
           <el-button @click="handleReset">重置</el-button>
         </el-col>
-        <el-col :xs="12" :sm="6" :md="5" style="text-align: right">
+      </el-row>
+      <el-row :gutter="16">
+        <el-col :xs="12" :sm="6" :md="24" style="text-align: right">
           <el-button type="primary" @click="handleCreate">
             <el-icon><Plus /></el-icon>
             新建报告
@@ -82,6 +97,7 @@
             style="width: 100%"
             @row-click="handleRowClick"
             @current-change="handleCurrentChange"
+            @sort-change="handleSortChange"
           >
             <el-table-column prop="client_name" label="客户名称" min-width="130" />
             <el-table-column prop="area" label="区域" width="100" />
@@ -94,7 +110,7 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="due_date" label="到期日期" width="110" />
+            <el-table-column prop="due_date" label="到期日期" width="110" sortable="custom" />
             <el-table-column prop="responsibility" label="责任人" width="90" />
             <el-table-column prop="actions_count" label="行动" width="70" align="center" />
             <el-table-column label="操作" width="180" fixed="right">
@@ -276,8 +292,13 @@ const searchParams = ref({
   area: '',
   tasks: '',
   responsibility: '',
-  status: ''
+  status: '',
+  due_date_after: '',
+  due_date_before: '',
+  ordering: ''
 })
+
+const dateRange = ref(null)
 
 // 选中的报告和行动记录
 const selectedReport = ref(null)
@@ -345,14 +366,40 @@ const handleSearch = () => {
   loadReports()
 }
 
+const handleDateRangeChange = (value) => {
+  if (value && value.length === 2) {
+    searchParams.value.due_date_after = value[0]
+    searchParams.value.due_date_before = value[1]
+  } else {
+    searchParams.value.due_date_after = ''
+    searchParams.value.due_date_before = ''
+  }
+  handleSearch()
+}
+
+const handleSortChange = ({ prop, order }) => {
+  if (order === 'ascending') {
+    searchParams.value.ordering = 'due_date'
+  } else if (order === 'descending') {
+    searchParams.value.ordering = '-due_date'
+  } else {
+    searchParams.value.ordering = ''
+  }
+  handleSearch()
+}
+
 const handleReset = () => {
   searchParams.value = {
     search: '',
     area: '',
     tasks: '',
     responsibility: '',
-    status: ''
+    status: '',
+    due_date_after: '',
+    due_date_before: '',
+    ordering: ''
   }
+  dateRange.value = null
   handleSearch()
 }
 
