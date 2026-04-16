@@ -235,12 +235,17 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='add-action')
     def add_action(self, request, pk=None):
-        """添加行动记录"""
+        """添加行动记录（兼容旧格式）"""
         report = self.get_object()
-        content = request.data.get('content', '').strip()
+
+        # 支持新旧两种格式
+        action_date = request.data.get('action_date', '').strip()
+        action_content = request.data.get('action', request.data.get('content', '')).strip()
+        result = request.data.get('result', '').strip()
+        next_step = request.data.get('next_step', '').strip()
         user = request.data.get('user', '').strip()
 
-        if not content:
+        if not action_content:
             return Response(
                 {'error': '行动记录内容不能为空'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -249,7 +254,10 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
         # 创建新的行动记录
         action_record = {
             'timestamp': timezone.now().isoformat(),
-            'content': content,
+            'action_date': action_date,
+            'action': action_content,
+            'result': result,
+            'next_step': next_step,
             'user': user
         }
 
@@ -264,7 +272,7 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='actions/(?P<index>[0-9]+)/update')
     def update_action(self, request, pk=None, index=None):
-        """编辑行动记录"""
+        """编辑行动记录（兼容旧格式）"""
         report = self.get_object()
         try:
             index = int(index)
@@ -280,19 +288,27 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        content = request.data.get('content', '').strip()
+        # 支持新旧两种格式
+        action_date = request.data.get('action_date', '').strip()
+        action_content = request.data.get('action', request.data.get('content', '')).strip()
+        result = request.data.get('result', '').strip()
+        next_step = request.data.get('next_step', '').strip()
         user = request.data.get('user', '').strip()
 
-        if not content:
+        if not action_content:
             return Response(
                 {'error': '行动记录内容不能为空'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         # 更新行动记录（保留原始时间戳）
-        report.actions[index]['content'] = content
-        if user:
-            report.actions[index]['user'] = user
+        report.actions[index].update({
+            'action_date': action_date,
+            'action': action_content,
+            'result': result,
+            'next_step': next_step,
+            'user': user
+        })
         report.save()
 
         serializer = self.get_serializer(report)

@@ -129,9 +129,12 @@
             >
               <el-card shadow="hover" class="action-card">
                 <div class="action-content">
-                  <p>{{ action.content }}</p>
+                  <p><strong>行动内容：</strong>{{ action.action || action.content }}</p>
+                  <p v-if="action.result"><strong>结果：</strong>{{ action.result }}</p>
+                  <p v-if="action.next_step"><strong>下一步：</strong>{{ action.next_step }}</p>
                   <div class="action-meta">
-                    <el-tag size="small">{{ action.user }}</el-tag>
+                    <el-tag v-if="action.action_date" size="small">{{ action.action_date }}</el-tag>
+                    <el-tag v-if="action.user" size="small" type="info">{{ action.user }}</el-tag>
                   </div>
                 </div>
                 <div class="action-actions">
@@ -154,24 +157,50 @@
     <el-dialog
       v-model="actionDialogVisible"
       :title="actionDialogTitle"
-      width="500px"
+      width="600px"
     >
-      <el-form :model="actionForm" label-width="80px">
-        <el-form-item label="内容" required>
-          <el-input
-            v-model="actionForm.content"
-            type="textarea"
-            :rows="4"
-            placeholder="请输入行动记录内容"
+      <el-form ref="actionFormRef" :model="actionForm" :rules="actionRules" label-width="100px">
+        <el-form-item label="行动日期" prop="action_date">
+          <el-date-picker
+            v-model="actionForm.action_date"
+            type="date"
+            placeholder="选择行动日期"
+            format="YYYY-MM-DD"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
           />
         </el-form-item>
-        <el-form-item label="记录人" required>
-          <el-input v-model="actionForm.user" placeholder="请输入记录人" />
+
+        <el-form-item label="行动内容" prop="action">
+          <el-input
+            v-model="actionForm.action"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入行动内容"
+          />
+        </el-form-item>
+
+        <el-form-item label="结果">
+          <el-input
+            v-model="actionForm.result"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入结果"
+          />
+        </el-form-item>
+
+        <el-form-item label="下一步">
+          <el-input
+            v-model="actionForm.next_step"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入下一步计划"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="actionDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSaveAction">确定</el-button>
+        <el-button type="primary" @click="handleSaveAction">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -226,10 +255,18 @@ const rules = {
 const actionDialogVisible = ref(false)
 const actionDialogTitle = ref('添加行动记录')
 const actionEditIndex = ref(-1)
+const actionFormRef = ref(null)
 const actionForm = reactive({
-  content: '',
-  user: ''
+  action_date: '',
+  action: '',
+  result: '',
+  next_step: ''
 })
+
+const actionRules = {
+  action_date: [{ required: true, message: '请选择行动日期', trigger: 'change' }],
+  action: [{ required: true, message: '请输入行动内容', trigger: 'blur' }]
+}
 
 const loadReport = async () => {
   if (isNew.value) return
@@ -280,39 +317,44 @@ const handleSave = async () => {
 const handleAddAction = () => {
   actionDialogTitle.value = '添加行动记录'
   actionEditIndex.value = -1
-  actionForm.content = ''
-  actionForm.user = ''
+  actionForm.action_date = new Date().toISOString().split('T')[0]
+  actionForm.action = ''
+  actionForm.result = ''
+  actionForm.next_step = ''
   actionDialogVisible.value = true
 }
 
 const handleEditAction = (index) => {
   actionDialogTitle.value = '编辑行动记录'
   actionEditIndex.value = index
-  actionForm.content = form.actions[index].content
-  actionForm.user = form.actions[index].user
+  const action = form.actions[index]
+  actionForm.action_date = action.action_date || ''
+  actionForm.action = action.action || action.content || ''
+  actionForm.result = action.result || ''
+  actionForm.next_step = action.next_step || ''
   actionDialogVisible.value = true
 }
 
 const handleSaveAction = async () => {
-  if (!actionForm.content.trim()) {
-    ElMessage.warning('请输入行动记录内容')
-    return
-  }
-  if (!actionForm.user.trim()) {
-    ElMessage.warning('请输入记录人')
-    return
-  }
-
   try {
+    await actionFormRef.value.validate()
+
     if (isNew.value) {
       // 新建报告时，直接添加到本地数组
       if (actionEditIndex.value >= 0) {
-        form.actions[actionEditIndex.value].content = actionForm.content
-        form.actions[actionEditIndex.value].user = actionForm.user
+        form.actions[actionEditIndex.value] = {
+          ...form.actions[actionEditIndex.value],
+          action_date: actionForm.action_date,
+          action: actionForm.action,
+          result: actionForm.result,
+          next_step: actionForm.next_step
+        }
       } else {
         form.actions.push({
-          content: actionForm.content,
-          user: actionForm.user,
+          action_date: actionForm.action_date,
+          action: actionForm.action,
+          result: actionForm.result,
+          next_step: actionForm.next_step,
           timestamp: new Date().toISOString()
         })
       }
@@ -321,14 +363,18 @@ const handleSaveAction = async () => {
       // 编辑已有报告时，调用 API
       if (actionEditIndex.value >= 0) {
         await updateAction(route.params.id, actionEditIndex.value, {
-          content: actionForm.content,
-          user: actionForm.user
+          action_date: actionForm.action_date,
+          action: actionForm.action,
+          result: actionForm.result,
+          next_step: actionForm.next_step
         })
         ElMessage.success('更新成功')
       } else {
         await addAction(route.params.id, {
-          content: actionForm.content,
-          user: actionForm.user
+          action_date: actionForm.action_date,
+          action: actionForm.action,
+          result: actionForm.result,
+          next_step: actionForm.next_step
         })
         ElMessage.success('添加成功')
       }
@@ -336,8 +382,10 @@ const handleSaveAction = async () => {
     }
     actionDialogVisible.value = false
   } catch (error) {
-    ElMessage.error('操作失败')
-    console.error(error)
+    if (error !== false) {
+      ElMessage.error('操作失败')
+      console.error(error)
+    }
   }
 }
 
