@@ -1,13 +1,107 @@
+import csv
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+from io import StringIO
+
+from openpyxl import load_workbook
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
-from .models import Customer, Contact, WeeklyReport
+from .models import Customer, Contact, CustomerRevenue, WeeklyReport
 from .serializers import (
     CustomerSerializer, CustomerListSerializer, ContactSerializer,
-    WeeklyReportSerializer, WeeklyReportListSerializer
+    CustomerRevenueSerializer, WeeklyReportSerializer, WeeklyReportListSerializer
 )
+
+
+REVENUE_REQUIRED_COLUMNS = {'month', 'customer name', 'revenue'}
+
+
+def _normalize_header(value):
+    return str(value or '').strip().lower()
+
+
+def _read_revenue_rows(upload):
+    filename = upload.name.lower()
+    if filename.endswith('.xlsx'):
+        return _read_xlsx_revenue_rows(upload)
+    if filename.endswith('.csv'):
+        return _read_csv_revenue_rows(upload)
+    raise ValueError('仅支持 .xlsx 或 .csv 文件')
+
+
+def _read_csv_revenue_rows(upload):
+    content = upload.read().decode('utf-8-sig')
+    reader = csv.DictReader(StringIO(content))
+    if not reader.fieldnames:
+        raise ValueError('文件缺少表头')
+
+    headers = {_normalize_header(name): name for name in reader.fieldnames}
+    missing = REVENUE_REQUIRED_COLUMNS - set(headers.keys())
+    if missing:
+        raise ValueError(f"缺少字段: {', '.join(sorted(missing))}")
+
+    rows = []
+    for index, row in enumerate(reader, start=2):
+        rows.append((
+            index,
+            {column: row.get(headers[column]) for column in REVENUE_REQUIRED_COLUMNS}
+        ))
+    return rows
+
+
+def _read_xlsx_revenue_rows(upload):
+    workbook = load_workbook(upload, read_only=True, data_only=True)
+    sheet = workbook.active
+    header_row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_row:
+        raise ValueError('文件缺少表头')
+
+    headers = {_normalize_header(name): position for position, name in enumerate(header_row)}
+    missing = REVENUE_REQUIRED_COLUMNS - set(headers.keys())
+    if missing:
+        raise ValueError(f"缺少字段: {', '.join(sorted(missing))}")
+
+    rows = []
+    for index, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+        rows.append((
+            index,
+            {column: values[headers[column]] if headers[column] < len(values) else None for column in REVENUE_REQUIRED_COLUMNS}
+        ))
+    workbook.close()
+    return rows
+
+
+def _parse_month(value):
+    if isinstance(value, datetime):
+        return value.date().replace(day=1)
+    if isinstance(value, date):
+        return value.replace(day=1)
+
+    raw_value = str(value or '').strip()
+    if not raw_value:
+        raise ValueError('month 不能为空')
+
+    for date_format in ('%Y-%m', '%Y/%m', '%Y.%m', '%Y-%m-%d', '%Y/%m/%d', '%Y.%m.%d'):
+        try:
+            parsed = datetime.strptime(raw_value, date_format).date()
+            return parsed.replace(day=1)
+        except ValueError:
+            continue
+    raise ValueError('month 格式不正确，请使用 YYYY-MM 或 YYYY-MM-DD')
+
+
+def _parse_revenue(value):
+    raw_value = str(value or '').strip().replace(',', '')
+    if not raw_value:
+        raise ValueError('revenue 不能为空')
+    try:
+        return Decimal(raw_value)
+    except InvalidOperation as exc:
+        raise ValueError('revenue 必须是数字') from exc
 
 
 class CustomerViewSet(viewsets.ModelViewSet):
@@ -31,9 +125,9 @@ class CustomerViewSet(viewsets.ModelViewSet):
         """优化查询性能"""
         queryset = super().get_queryset()
         if self.action == 'list':
-            queryset = queryset.prefetch_related('contacts')
+            queryset = queryset.prefetch_related('contacts', 'revenue_records')
         elif self.action == 'retrieve':
-            queryset = queryset.prefetch_related('contacts')
+            queryset = queryset.prefetch_related('contacts', 'revenue_records')
         return queryset
 
     @action(detail=False, methods=['get'])
@@ -87,6 +181,80 @@ class ContactViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """优化查询性能"""
         return super().get_queryset().select_related('customer')
+
+
+class CustomerRevenueViewSet(viewsets.ModelViewSet):
+    """客户营收视图集"""
+
+    queryset = CustomerRevenue.objects.all()
+    serializer_class = CustomerRevenueSerializer
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['customer', 'month']
+    search_fields = ['customer__client_name']
+    ordering_fields = ['month', 'revenue', 'created_at', 'updated_at']
+    ordering = ['-month', 'customer__client_name']
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        return super().get_queryset().select_related('customer')
+
+    @action(detail=False, methods=['post'], url_path='import')
+    def import_file(self, request):
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'error': '请上传文件'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            rows = _read_revenue_rows(upload)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        imported = 0
+        updated = 0
+        skipped = 0
+        errors = []
+
+        for row_number, row in rows:
+            customer_name = (row.get('customer name') or '').strip()
+            customer = Customer.objects.filter(client_name=customer_name).first()
+            if not customer:
+                skipped += 1
+                errors.append({
+                    'row': row_number,
+                    'customer_name': customer_name,
+                    'reason': '客户名称未完全匹配 Fishpool 客户'
+                })
+                continue
+
+            try:
+                month = _parse_month(row.get('month'))
+                revenue = _parse_revenue(row.get('revenue'))
+            except ValueError as exc:
+                skipped += 1
+                errors.append({
+                    'row': row_number,
+                    'customer_name': customer_name,
+                    'reason': str(exc)
+                })
+                continue
+
+            _, created = CustomerRevenue.objects.update_or_create(
+                customer=customer,
+                month=month,
+                defaults={'revenue': revenue}
+            )
+            if created:
+                imported += 1
+            else:
+                updated += 1
+
+        return Response({
+            'imported': imported,
+            'updated': updated,
+            'skipped': skipped,
+            'errors': errors[:50],
+        })
 
 
 class WeeklyReportViewSet(viewsets.ModelViewSet):

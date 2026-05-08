@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Customer, Contact, WeeklyReport
+from .models import Customer, Contact, CustomerRevenue, WeeklyReport
 
 
 @admin.register(Customer)
@@ -52,6 +52,17 @@ class ContactAdmin(admin.ModelAdmin):
     list_filter = ['is_key_person', 'customer']
     search_fields = ['name', 'position', 'phone', 'email']
     ordering = ['-created_at']
+
+
+@admin.register(CustomerRevenue)
+class CustomerRevenueAdmin(admin.ModelAdmin):
+    """客户营收管理后台"""
+
+    list_display = ['customer', 'month', 'revenue', 'updated_at']
+    list_filter = ['month', 'customer']
+    search_fields = ['customer__client_name']
+    ordering = ['-month', 'customer__client_name']
+    raw_id_fields = ['customer']
 
 
 @admin.register(WeeklyReport)

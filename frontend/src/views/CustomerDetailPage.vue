@@ -59,6 +59,44 @@
 
         <el-card class="stack-card" shadow="never">
           <template #header>
+            <div class="card-header">
+              <span>营收数据</span>
+              <el-button type="primary" size="small" @click="handleAddRevenue">
+                <el-icon><Plus /></el-icon>
+                新增营收
+              </el-button>
+            </div>
+          </template>
+
+          <div class="revenue-summary">
+            <div>
+              <span>去年营收</span>
+              <strong>{{ formatCurrency(customer.last_year_revenue) }}</strong>
+            </div>
+            <div>
+              <span>上季度营收</span>
+              <strong>{{ formatCurrency(customer.last_quarter_revenue) }}</strong>
+            </div>
+          </div>
+
+          <el-table :data="revenueRecords" class="revenue-table" stripe>
+            <el-table-column prop="month" label="月份" width="120">
+              <template #default="{ row }">
+                {{ formatMonth(row.month) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="revenue" label="营收">
+              <template #default="{ row }">
+                {{ formatCurrency(row.revenue) }}
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <el-empty v-if="!revenueRecords.length" description="暂无营收数据" />
+        </el-card>
+
+        <el-card class="stack-card" shadow="never">
+          <template #header>
             <span>备注</span>
           </template>
           <p class="paragraph">{{ customer.notes || '暂无备注' }}</p>
@@ -125,6 +163,35 @@
       :customer-id="Number(route.params.id)"
       @success="fetchContacts"
     />
+
+    <el-dialog
+      v-model="revenueFormVisible"
+      title="新增营收"
+      width="420px"
+      destroy-on-close
+      @close="resetRevenueForm"
+    >
+      <el-form ref="revenueFormRef" :model="revenueForm" :rules="revenueRules" label-width="80px">
+        <el-form-item label="月份" prop="month">
+          <el-date-picker
+            v-model="revenueForm.month"
+            type="month"
+            value-format="YYYY-MM"
+            placeholder="选择月份"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="营收" prop="revenue">
+          <el-input v-model="revenueForm.revenue" placeholder="输入营收金额" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="revenueFormVisible = false">取消</el-button>
+        <el-button type="primary" :loading="revenueSaving" @click="handleRevenueSubmit">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -136,6 +203,7 @@ import { Plus } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { deleteCustomer, getCustomer } from '../api/customer'
 import { deleteContact, getContacts } from '../api/contactApi'
+import { createCustomerRevenue, getCustomerRevenues } from '../api/customerRevenue'
 import CustomerDialog from '../components/CustomerDialog.vue'
 import ContactDialog from '../components/ContactDialog.vue'
 
@@ -150,6 +218,19 @@ const chartInstance = ref(null)
 const formVisible = ref(false)
 const contactFormVisible = ref(false)
 const currentContact = ref(null)
+const revenueRecords = ref([])
+const revenueFormVisible = ref(false)
+const revenueSaving = ref(false)
+const revenueFormRef = ref(null)
+const revenueForm = ref({
+  month: '',
+  revenue: ''
+})
+
+const revenueRules = {
+  month: [{ required: true, message: '请选择月份', trigger: 'change' }],
+  revenue: [{ required: true, message: '请输入营收金额', trigger: 'blur' }]
+}
 
 const getLevelType = (level) => {
   const types = {
@@ -166,6 +247,21 @@ const formatDate = (value) => {
     return '暂无'
   }
   return new Date(value).toLocaleString('zh-CN')
+}
+
+const formatMonth = (value) => {
+  if (!value) {
+    return '暂无'
+  }
+  return String(value).slice(0, 7)
+}
+
+const formatCurrency = (value) => {
+  const amount = Number(value || 0)
+  return amount.toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })
 }
 
 const initChart = () => {
@@ -239,6 +335,22 @@ const fetchContacts = async () => {
   }
 }
 
+const fetchRevenueRecords = async () => {
+  try {
+    const response = await getCustomerRevenues({
+      customer: route.params.id,
+      page_size: 100,
+      ordering: '-month'
+    })
+    const results = response.data?.results ?? response.data ?? []
+    revenueRecords.value = Array.isArray(results) ? results : []
+  } catch (error) {
+    revenueRecords.value = []
+    ElMessage.error('获取营收数据失败')
+    console.error(error)
+  }
+}
+
 const handleBack = () => {
   router.push('/customers')
 }
@@ -272,6 +384,41 @@ const handleEditContact = (contact) => {
   contactFormVisible.value = true
 }
 
+const resetRevenueForm = () => {
+  revenueForm.value = {
+    month: '',
+    revenue: ''
+  }
+  revenueFormRef.value?.clearValidate()
+}
+
+const handleAddRevenue = () => {
+  resetRevenueForm()
+  revenueFormVisible.value = true
+}
+
+const handleRevenueSubmit = async () => {
+  try {
+    await revenueFormRef.value.validate()
+    revenueSaving.value = true
+    await createCustomerRevenue({
+      customer_name: customer.value.name,
+      month: `${revenueForm.value.month}-01`,
+      revenue: revenueForm.value.revenue
+    })
+    ElMessage.success('营收保存成功')
+    revenueFormVisible.value = false
+    await Promise.all([fetchCustomer(), fetchRevenueRecords()])
+  } catch (error) {
+    if (error?.response?.data) {
+      ElMessage.error('营收保存失败，请确认客户名称完全匹配')
+    }
+    console.error(error)
+  } finally {
+    revenueSaving.value = false
+  }
+}
+
 const handleDeleteContact = async (id) => {
   try {
     await ElMessageBox.confirm('确定删除当前联系人吗？', '提示', {
@@ -292,12 +439,14 @@ watch(
   () => {
     fetchCustomer()
     fetchContacts()
+    fetchRevenueRecords()
   }
 )
 
 onMounted(() => {
   fetchCustomer()
   fetchContacts()
+  fetchRevenueRecords()
 })
 
 onUnmounted(() => {
@@ -346,5 +495,34 @@ onUnmounted(() => {
   line-height: 1.7;
   color: #4b5563;
   white-space: pre-wrap;
+}
+
+.revenue-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.revenue-summary div {
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+}
+
+.revenue-summary span {
+  display: block;
+  margin-bottom: 4px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.revenue-summary strong {
+  color: #111827;
+  font-size: 18px;
+}
+
+.revenue-table {
+  width: 100%;
 }
 </style>

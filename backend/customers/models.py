@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.db import models
+from django.utils import timezone
 
 
 class Customer(models.Model):
@@ -105,6 +108,59 @@ class Contact(models.Model):
         return f"{self.name} - {self.customer.client_name}"
 
 
+class CustomerRevenue(models.Model):
+    """客户月度营收数据"""
+
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.CASCADE,
+        related_name='revenue_records',
+        verbose_name='客户'
+    )
+    month = models.DateField(verbose_name='月份', db_index=True)
+    revenue = models.DecimalField(max_digits=14, decimal_places=2, verbose_name='营收')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'customer_revenues'
+        verbose_name = '客户营收'
+        verbose_name_plural = '客户营收'
+        ordering = ['-month', 'customer__client_name']
+        constraints = [
+            models.UniqueConstraint(fields=['customer', 'month'], name='unique_customer_month_revenue')
+        ]
+        indexes = [
+            models.Index(fields=['customer', 'month']),
+        ]
+
+    def __str__(self):
+        return f"{self.customer.client_name} - {self.month:%Y-%m}: {self.revenue}"
+
+
+def get_last_quarter_range(reference_date=None):
+    """Return the first and last day for the previous calendar quarter."""
+    reference_date = reference_date or timezone.localdate()
+    current_quarter = (reference_date.month - 1) // 3 + 1
+    if current_quarter == 1:
+        year = reference_date.year - 1
+        quarter = 4
+    else:
+        year = reference_date.year
+        quarter = current_quarter - 1
+
+    start_month = (quarter - 1) * 3 + 1
+    end_month = start_month + 2
+    start_date = reference_date.replace(year=year, month=start_month, day=1)
+
+    if end_month == 12:
+        next_month = reference_date.replace(year=year + 1, month=1, day=1)
+    else:
+        next_month = reference_date.replace(year=year, month=end_month + 1, day=1)
+    end_date = next_month - timedelta(days=1)
+    return start_date, end_date
+
+
 class WeeklyReport(models.Model):
     """Weekly Report 项目跟进记录模型"""
 
@@ -183,4 +239,3 @@ class WeeklyReport(models.Model):
 
     def __str__(self):
         return f"{self.client_name} - {self.definition[:50]}"
-

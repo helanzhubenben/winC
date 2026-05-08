@@ -71,6 +71,17 @@
           <el-icon><Plus /></el-icon>
           新增客户
         </el-button>
+        <input
+          ref="revenueFileInput"
+          class="hidden-file-input"
+          type="file"
+          accept=".xlsx,.csv"
+          @change="handleRevenueFileChange"
+        />
+        <el-button :loading="revenueImporting" @click="handleRevenueImportClick">
+          <el-icon><Upload /></el-icon>
+          导入营收
+        </el-button>
       </div>
     </el-card>
 
@@ -110,6 +121,17 @@
               <span>潜在贡献</span>
               <strong>{{ customer.potential_contribution || '暂无' }}</strong>
             </div>
+
+            <div class="revenue-grid">
+              <div>
+                <span>去年营收</span>
+                <strong>{{ formatCurrency(customer.last_year_revenue) }}</strong>
+              </div>
+              <div>
+                <span>上季度营收</span>
+                <strong>{{ formatCurrency(customer.last_quarter_revenue) }}</strong>
+              </div>
+            </div>
           </el-card>
         </el-col>
       </el-row>
@@ -145,8 +167,9 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, Search } from '@element-plus/icons-vue'
+import { Plus, Search, Upload } from '@element-plus/icons-vue'
 import { getCustomers } from '../api/customer'
+import { importCustomerRevenues } from '../api/customerRevenue'
 import CustomerDialog from '../components/CustomerDialog.vue'
 
 const router = useRouter()
@@ -155,6 +178,8 @@ const customers = ref([])
 const total = ref(0)
 const formVisible = ref(false)
 const currentCustomer = ref(null)
+const revenueFileInput = ref(null)
+const revenueImporting = ref(false)
 
 const searchParams = ref({
   search: '',
@@ -174,6 +199,14 @@ const getLevelType = (level) => {
     D: 'info'
   }
   return types[level] || 'info'
+}
+
+const formatCurrency = (value) => {
+  const amount = Number(value || 0)
+  return amount.toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })
 }
 
 const fetchCustomers = async () => {
@@ -209,6 +242,32 @@ const handleAdd = () => {
   formVisible.value = true
 }
 
+const handleRevenueImportClick = () => {
+  revenueFileInput.value?.click()
+}
+
+const handleRevenueFileChange = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) {
+    return
+  }
+
+  revenueImporting.value = true
+  try {
+    const response = await importCustomerRevenues(file)
+    const { imported = 0, updated = 0, skipped = 0 } = response.data ?? {}
+    ElMessage.success(`导入完成：新增 ${imported}，更新 ${updated}，跳过 ${skipped}`)
+    fetchCustomers()
+  } catch (error) {
+    const message = error?.response?.data?.error || '营收导入失败'
+    ElMessage.error(message)
+    console.error(error)
+  } finally {
+    revenueImporting.value = false
+    event.target.value = ''
+  }
+}
+
 const handleCardClick = (id) => {
   router.push(`/customers/${id}`)
 }
@@ -232,8 +291,13 @@ onMounted(() => {
 
 .toolbar-actions {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
+  gap: 12px;
   margin-top: 18px;
+}
+
+.hidden-file-input {
+  display: none;
 }
 
 .content-area {
@@ -291,6 +355,30 @@ onMounted(() => {
   gap: 8px;
   flex-wrap: wrap;
   margin-bottom: 12px;
+}
+
+.revenue-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid #ebeef5;
+}
+
+.revenue-grid div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.revenue-grid span {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.revenue-grid strong {
+  font-size: 15px;
+  color: #111827;
 }
 
 .pagination {

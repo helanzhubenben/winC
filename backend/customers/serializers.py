@@ -1,5 +1,9 @@
+from decimal import Decimal
+
+from django.db.models import Sum
+from django.utils import timezone
 from rest_framework import serializers
-from .models import Customer, Contact, WeeklyReport
+from .models import Customer, Contact, CustomerRevenue, WeeklyReport, get_last_quarter_range
 
 
 class BlankableDateField(serializers.DateField):
@@ -29,10 +33,36 @@ class ContactSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
 
+def _last_year_range():
+    today = timezone.localdate()
+    start_date = today.replace(year=today.year - 1, month=1, day=1)
+    end_date = today.replace(year=today.year - 1, month=12, day=31)
+    return start_date, end_date
+
+
+def _sum_revenue(customer, date_range):
+    start_date, end_date = date_range
+    prefetched = getattr(customer, '_prefetched_objects_cache', {}).get('revenue_records')
+    if prefetched is not None:
+        total = sum(
+            (record.revenue for record in prefetched if start_date <= record.month <= end_date),
+            Decimal('0')
+        )
+        return f'{total or Decimal("0"):.2f}'
+
+    total = customer.revenue_records.filter(
+        month__gte=start_date,
+        month__lte=end_date,
+    ).aggregate(total=Sum('revenue'))['total']
+    return f'{total or Decimal("0"):.2f}'
+
+
 class CustomerSerializer(serializers.ModelSerializer):
     """客户序列化器"""
 
     contacts = ContactSerializer(many=True, read_only=True)
+    last_year_revenue = serializers.SerializerMethodField()
+    last_quarter_revenue = serializers.SerializerMethodField()
     # 字段映射以匹配前端
     name = serializers.CharField(source='client_name')
     region = serializers.CharField(source='area')
@@ -60,6 +90,8 @@ class CustomerSerializer(serializers.ModelSerializer):
             'level',
             'strategy',
             'potential_contribution',
+            'last_year_revenue',
+            'last_quarter_revenue',
             'notes',
             'status',
             'created_at',
@@ -68,11 +100,19 @@ class CustomerSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+    def get_last_year_revenue(self, obj):
+        return _sum_revenue(obj, _last_year_range())
+
+    def get_last_quarter_revenue(self, obj):
+        return _sum_revenue(obj, get_last_quarter_range())
+
 
 class CustomerListSerializer(serializers.ModelSerializer):
     """客户列表序列化器（简化版）"""
 
     contacts_count = serializers.SerializerMethodField()
+    last_year_revenue = serializers.SerializerMethodField()
+    last_quarter_revenue = serializers.SerializerMethodField()
     # 字段映射以匹配前端
     name = serializers.CharField(source='client_name')
     region = serializers.CharField(source='area')
@@ -90,12 +130,61 @@ class CustomerListSerializer(serializers.ModelSerializer):
             'score_y',
             'score_z',
             'potential_contribution',
+            'last_year_revenue',
+            'last_quarter_revenue',
             'contacts_count',
             'updated_at'
         ]
 
     def get_contacts_count(self, obj):
         return obj.contacts.count()
+
+    def get_last_year_revenue(self, obj):
+        return _sum_revenue(obj, _last_year_range())
+
+    def get_last_quarter_revenue(self, obj):
+        return _sum_revenue(obj, get_last_quarter_range())
+
+
+class CustomerRevenueSerializer(serializers.ModelSerializer):
+    """客户营收序列化器"""
+
+    customer_name = serializers.CharField(write_only=True, required=True)
+    matched_customer_name = serializers.CharField(source='customer.client_name', read_only=True)
+
+    class Meta:
+        model = CustomerRevenue
+        fields = [
+            'id',
+            'customer',
+            'customer_name',
+            'matched_customer_name',
+            'month',
+            'revenue',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'customer', 'matched_customer_name', 'created_at', 'updated_at']
+
+    def validate_customer_name(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('客户名称不能为空')
+        customer = Customer.objects.filter(client_name=value).first()
+        if not customer:
+            raise serializers.ValidationError('客户名称未完全匹配 Fishpool 客户，不会添加营收数据')
+        self._matched_customer = customer
+        return value
+
+    def create(self, validated_data):
+        validated_data.pop('customer_name', None)
+        validated_data['customer'] = self._matched_customer
+        record, _ = CustomerRevenue.objects.update_or_create(
+            customer=validated_data['customer'],
+            month=validated_data['month'],
+            defaults={'revenue': validated_data['revenue']}
+        )
+        return record
 
 
 class WeeklyReportSerializer(serializers.ModelSerializer):
