@@ -7,6 +7,13 @@ export function getCustomers(params) {
   return axios.get(`${API_BASE_URL}/customers/`, { params })
 }
 
+export function exportCustomers(params) {
+  return axios.get(`${API_BASE_URL}/customers/export/`, {
+    params,
+    responseType: 'blob'
+  })
+}
+
 // 获取客户详情
 export function getCustomer(id) {
   return axios.get(`${API_BASE_URL}/customers/${id}/`)

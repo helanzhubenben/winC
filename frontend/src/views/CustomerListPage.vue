@@ -82,6 +82,10 @@
           <el-icon><Upload /></el-icon>
           导入营收
         </el-button>
+        <el-button :loading="exporting" @click="handleExport">
+          <el-icon><Download /></el-icon>
+          导出全部
+        </el-button>
       </div>
     </el-card>
 
@@ -167,9 +171,10 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, Search, Upload } from '@element-plus/icons-vue'
+import { Download, Plus, Search, Upload } from '@element-plus/icons-vue'
 import { getCustomers } from '../api/customer'
 import { importCustomerRevenues } from '../api/customerRevenue'
+import { exportWorkbook } from '../api/export'
 import CustomerDialog from '../components/CustomerDialog.vue'
 
 const router = useRouter()
@@ -180,6 +185,7 @@ const formVisible = ref(false)
 const currentCustomer = ref(null)
 const revenueFileInput = ref(null)
 const revenueImporting = ref(false)
+const exporting = ref(false)
 
 const searchParams = ref({
   search: '',
@@ -265,6 +271,31 @@ const handleRevenueFileChange = async (event) => {
   } finally {
     revenueImporting.value = false
     event.target.value = ''
+  }
+}
+
+const downloadBlob = (blob, filename) => {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+const handleExport = async () => {
+  exporting.value = true
+  try {
+    const response = await exportWorkbook()
+    downloadBlob(response.data, 'fishpool-export.xlsx')
+    ElMessage.success('导出完成')
+  } catch (error) {
+    ElMessage.error('导出失败')
+    console.error(error)
+  } finally {
+    exporting.value = false
   }
 }
 

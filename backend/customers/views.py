@@ -1,11 +1,12 @@
 import csv
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from io import StringIO
+from io import BytesIO, StringIO
 
-from openpyxl import load_workbook
+from django.http import HttpResponse
+from openpyxl import Workbook, load_workbook
 from rest_framework import viewsets, filters, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
@@ -18,10 +19,142 @@ from .serializers import (
 
 
 REVENUE_REQUIRED_COLUMNS = {'month', 'customer name', 'revenue'}
+EXCEL_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+
+def _xlsx_response(workbook, filename):
+    output = BytesIO()
+    workbook.save(output)
+    workbook.close()
+    output.seek(0)
+
+    response = HttpResponse(output.getvalue(), content_type=EXCEL_CONTENT_TYPE)
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
 
 
 def _normalize_header(value):
     return str(value or '').strip().lower()
+
+
+def _format_export_date(value):
+    return value.strftime('%Y-%m-%d') if value else ''
+
+
+def _format_export_datetime(value):
+    return timezone.localtime(value).strftime('%Y-%m-%d %H:%M:%S') if value else ''
+
+
+def _add_customers_sheet(workbook, queryset=None):
+    sheet = workbook.active
+    sheet.title = '客户池'
+    sheet.append([
+        '客户名称',
+        '业务模式',
+        '区域',
+        '城市',
+        '客户等级',
+        'X评分',
+        'Y评分',
+        'Z评分',
+        '潜在贡献',
+        '去年营收',
+        '上季度营收',
+        '联系人数',
+        '更新时间',
+    ])
+
+    queryset = queryset or Customer.objects.all().prefetch_related('contacts', 'revenue_records')
+    serializer = CustomerListSerializer(queryset, many=True)
+    for item in serializer.data:
+        sheet.append([
+            item.get('name', ''),
+            item.get('business_model', ''),
+            item.get('region', ''),
+            item.get('city', ''),
+            item.get('level', ''),
+            item.get('score_x', 0),
+            item.get('score_y', 0),
+            item.get('score_z', 0),
+            item.get('potential_contribution') or '',
+            item.get('last_year_revenue', '0.00'),
+            item.get('last_quarter_revenue', '0.00'),
+            item.get('contacts_count', 0),
+            item.get('updated_at', ''),
+        ])
+    return sheet
+
+
+def _action_value(action, key, fallback=''):
+    if isinstance(action, dict):
+        return action.get(key, fallback)
+    return fallback
+
+
+def _add_weekly_reports_sheet(workbook, queryset=None):
+    sheet = workbook.active if workbook.sheetnames == ['Sheet'] else workbook.create_sheet('周报')
+    sheet.title = '周报'
+    sheet.append([
+        '客户名称',
+        '匹配客户',
+        '区域',
+        '地址',
+        '任务',
+        '项目定义',
+        '状态',
+        '到期日期',
+        '修订日期',
+        '完成日期',
+        '营收',
+        '责任人',
+        '备注',
+        'Action序号',
+        'Action日期',
+        'Action内容',
+        'Action结果',
+        'Action下一步',
+        'Action用户',
+        'Action创建时间',
+        '更新时间',
+    ])
+
+    queryset = queryset or WeeklyReport.objects.all().select_related('customer')
+    for report in queryset:
+        actions = report.actions or [None]
+        for index, action in enumerate(actions, start=1):
+            action_content = _action_value(action, 'action') or _action_value(action, 'content')
+            sheet.append([
+                report.client_name,
+                report.customer.client_name if report.customer else '',
+                report.area,
+                report.address,
+                report.tasks,
+                report.definition,
+                '已完成' if report.status == 'completed' else '进行中',
+                _format_export_date(report.due_date),
+                _format_export_date(report.revise_date),
+                _format_export_date(report.finish_date),
+                report.revenue,
+                report.responsibility,
+                report.remark,
+                index if action else '',
+                _action_value(action, 'action_date'),
+                action_content,
+                _action_value(action, 'result'),
+                _action_value(action, 'next_step'),
+                _action_value(action, 'user'),
+                _action_value(action, 'timestamp'),
+                _format_export_datetime(report.updated_at),
+            ])
+    return sheet
+
+
+@api_view(['GET'])
+def export_workbook(request):
+    workbook = Workbook()
+    _add_customers_sheet(workbook)
+    _add_weekly_reports_sheet(workbook)
+    return _xlsx_response(workbook, 'fishpool-export.xlsx')
 
 
 def _read_revenue_rows(upload):
@@ -167,6 +300,16 @@ class CustomerViewSet(viewsets.ModelViewSet):
         serializer = WeeklyReportListSerializer(reports, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request):
+        queryset = self.filter_queryset(
+            self.get_queryset().prefetch_related('contacts', 'revenue_records')
+        )
+
+        workbook = Workbook()
+        _add_customers_sheet(workbook, queryset)
+        return _xlsx_response(workbook, 'customers.xlsx')
+
 
 class ContactViewSet(viewsets.ModelViewSet):
     """联系人视图集"""
@@ -290,6 +433,14 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(due_date__lte=due_date_before)
 
         return queryset
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request):
+        queryset = self.filter_queryset(self.get_queryset().select_related('customer'))
+
+        workbook = Workbook()
+        _add_weekly_reports_sheet(workbook, queryset)
+        return _xlsx_response(workbook, 'weekly-reports.xlsx')
 
     @action(detail=True, methods=['get', 'post'], url_path='actions')
     def actions_list(self, request, pk=None):

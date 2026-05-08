@@ -2,6 +2,8 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
+from io import BytesIO
+from openpyxl import load_workbook
 
 from .models import Contact, Customer, CustomerRevenue, WeeklyReport, get_last_quarter_range
 
@@ -124,3 +126,109 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['last_year_revenue'], expected_last_year)
         self.assertEqual(response.data['last_quarter_revenue'], '300.00')
+
+    def test_export_customers_respects_filters(self):
+        response = self.client.get('/api/customers/export/', {'area': self.customer_b.area})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+        workbook = load_workbook(BytesIO(response.content), read_only=True)
+        rows = list(workbook.active.iter_rows(values_only=True))
+        workbook.close()
+
+        self.assertEqual(rows[0][0], '客户名称')
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][0], self.customer_b.client_name)
+
+    def test_export_weekly_reports_respects_filters(self):
+        WeeklyReport.objects.create(
+            client_name=self.customer_a.client_name,
+            customer=self.customer_a,
+            area=self.customer_a.area,
+            tasks='Task A',
+            definition='Definition A',
+            responsibility='Tester A',
+            status='in_progress',
+        )
+        WeeklyReport.objects.create(
+            client_name=self.customer_b.client_name,
+            customer=self.customer_b,
+            area=self.customer_b.area,
+            tasks='Task B',
+            definition='Definition B',
+            responsibility='Tester B',
+            status='completed',
+        )
+
+        response = self.client.get('/api/weekly-reports/export/', {'status': 'completed'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+        workbook = load_workbook(BytesIO(response.content), read_only=True)
+        rows = list(workbook.active.iter_rows(values_only=True))
+        workbook.close()
+
+        self.assertEqual(rows[0][0], '客户名称')
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][0], self.customer_b.client_name)
+        self.assertEqual(rows[1][6], '已完成')
+
+    def test_export_workbook_contains_customers_and_weekly_report_actions(self):
+        WeeklyReport.objects.create(
+            client_name=self.customer_a.client_name,
+            customer=self.customer_a,
+            area=self.customer_a.area,
+            address='Test address',
+            tasks='Task A',
+            definition='Definition A',
+            responsibility='Tester A',
+            status='in_progress',
+            actions=[
+                {
+                    'action_date': '2026-04-01',
+                    'action': 'First action',
+                    'result': 'First result',
+                    'next_step': 'First next step',
+                    'user': 'User A',
+                    'timestamp': '2026-04-01T10:00:00',
+                },
+                {
+                    'action_date': '2026-04-02',
+                    'content': 'Second action',
+                    'result': 'Second result',
+                    'next_step': 'Second next step',
+                    'user': 'User B',
+                    'timestamp': '2026-04-02T10:00:00',
+                },
+            ],
+        )
+
+        response = self.client.get('/api/export/workbook/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response['Content-Type'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+        workbook = load_workbook(BytesIO(response.content), read_only=True)
+        self.assertEqual(workbook.sheetnames, ['客户池', '周报'])
+
+        customer_rows = list(workbook['客户池'].iter_rows(values_only=True))
+        weekly_rows = list(workbook['周报'].iter_rows(values_only=True))
+        workbook.close()
+
+        self.assertEqual(customer_rows[0][0], '客户名称')
+        self.assertEqual(len(customer_rows), 3)
+        self.assertEqual(weekly_rows[0][15], 'Action内容')
+        self.assertEqual(len(weekly_rows), 3)
+        self.assertEqual(weekly_rows[1][15], 'First action')
+        self.assertEqual(weekly_rows[2][15], 'Second action')

@@ -81,6 +81,10 @@
             <el-icon><Plus /></el-icon>
             新建报告
           </el-button>
+          <el-button :loading="exporting" @click="handleExport">
+            <el-icon><Download /></el-icon>
+            导出全部
+          </el-button>
         </el-col>
       </el-row>
     </el-card>
@@ -267,7 +271,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Plus } from '@element-plus/icons-vue'
+import { Download, Search, Plus } from '@element-plus/icons-vue'
 import {
   getWeeklyReports,
   deleteWeeklyReport,
@@ -278,6 +282,7 @@ import {
   updateWeeklyReportAction,
   deleteWeeklyReportAction
 } from '../api/weeklyReport'
+import { exportWorkbook } from '../api/export'
 
 const router = useRouter()
 
@@ -286,6 +291,7 @@ const reports = ref([])
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
+const exporting = ref(false)
 
 const searchParams = ref({
   search: '',
@@ -414,6 +420,31 @@ const handleSizeChange = () => {
 
 const handleCreate = () => {
   router.push('/weekly-reports/new')
+}
+
+const downloadBlob = (blob, filename) => {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+const handleExport = async () => {
+  exporting.value = true
+  try {
+    const response = await exportWorkbook()
+    downloadBlob(response.data, 'fishpool-export.xlsx')
+    ElMessage.success('导出完成')
+  } catch (error) {
+    ElMessage.error('导出失败')
+    console.error(error)
+  } finally {
+    exporting.value = false
+  }
 }
 
 const handleEdit = (row) => {

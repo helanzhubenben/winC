@@ -7,6 +7,13 @@ export function getWeeklyReports(params) {
   return axios.get(`${API_BASE_URL}/weekly-reports/`, { params })
 }
 
+export function exportWeeklyReports(params) {
+  return axios.get(`${API_BASE_URL}/weekly-reports/export/`, {
+    params,
+    responseType: 'blob'
+  })
+}
+
 // 获取 Weekly Report 详情
 export function getWeeklyReport(id) {
   return axios.get(`${API_BASE_URL}/weekly-reports/${id}/`)
