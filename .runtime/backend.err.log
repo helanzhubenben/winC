@@ -1,11 +1,6 @@
 Watching for file changes with StatReloader
-[02/Apr/2026 11:50:44] "GET /api/customers/?search=&level=&region=&city=&business_model=&page=1&page_size=12 HTTP/1.1" 200 541
-[02/Apr/2026 11:51:16] "GET /api/customers/1/ HTTP/1.1" 200 577
-[02/Apr/2026 11:51:16] "GET /api/contacts/?customer=1 HTTP/1.1" 200 52
-[02/Apr/2026 11:51:29] "GET /api/customers/?search=&level=&region=&city=&business_model=&page=1&page_size=12 HTTP/1.1" 200 541
-[02/Apr/2026 11:52:02] "GET /api/contacts/?customer=1 HTTP/1.1" 200 52
-[02/Apr/2026 11:52:02] "GET /api/customers/1/ HTTP/1.1" 200 577
-[02/Apr/2026 11:52:05] "GET /api/customers/?search=&level=&region=&city=&business_model=&page=1&page_size=12 HTTP/1.1" 200 541
-[02/Apr/2026 11:52:08] "GET /api/customers/ HTTP/1.1" 200 541
-[02/Apr/2026 11:52:08,799] - Broken pipe from ('127.0.0.1', 55907)
-[02/Apr/2026 12:51:34] "GET /api/customers/?search=&level=&region=&city=&business_model=&page=1&page_size=12 HTTP/1.1" 200 541
+[09/May/2026 11:53:35] "HEAD /api/ HTTP/1.1" 200 0
+[09/May/2026 11:55:12] "GET /api/customers/?search=&level=&area=&city=&business_model=&page=1&page_size=12 HTTP/1.1" 200 52
+[09/May/2026 11:55:17] "GET /api/weekly-reports/?page=1&page_size=20 HTTP/1.1" 200 52
+[09/May/2026 11:55:18] "GET /api/customers/?search=&level=&area=&city=&business_model=&page=1&page_size=12 HTTP/1.1" 200 52
+[09/May/2026 11:55:29] "GET /api/weekly-reports/?page=1&page_size=20 HTTP/1.1" 200 52
