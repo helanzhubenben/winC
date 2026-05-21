@@ -564,6 +564,47 @@ class CustomerViewSet(viewsets.ModelViewSet):
         serializer = WeeklyReportListSerializer(reports, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['post'], url_path='create-action')
+    def create_action(self, request, pk=None):
+        """Create a Weekly Report action from a customer context."""
+        customer = self.get_object()
+        definition = _trimmed(request.data.get('definition'))
+        action_content = _trimmed(request.data.get('action') or request.data.get('content'))
+
+        if not definition:
+            return Response({'error': '项目定义不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+        if not action_content:
+            return Response({'error': '行动内容不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+
+        action_record = {
+            'timestamp': timezone.now().isoformat(),
+            'action_date': _trimmed(request.data.get('action_date')),
+            'action': action_content,
+            'result': _trimmed(request.data.get('result')),
+            'next_step': _trimmed(request.data.get('next_step')),
+            'user': _trimmed(request.data.get('user')),
+        }
+        report_data = {
+            'client_name': customer.client_name,
+            'customer': customer.id,
+            'area': customer.area,
+            'address': customer.address,
+            'tasks': _trimmed(request.data.get('tasks')),
+            'definition': definition,
+            'status': 'in_progress',
+            'due_date': request.data.get('due_date') or None,
+            'revenue': _trimmed(request.data.get('revenue')),
+            'responsibility': _trimmed(request.data.get('responsibility')),
+            'remark': _trimmed(request.data.get('remark')),
+            'actions': [action_record],
+        }
+
+        serializer = WeeklyReportSerializer(data=report_data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        report = serializer.save()
+        return Response(WeeklyReportSerializer(report).data, status=status.HTTP_201_CREATED)
+
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
         queryset = self.filter_queryset(

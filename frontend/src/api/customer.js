@@ -30,6 +30,10 @@ export function importCustomers(file) {
   })
 }
 
+export function createCustomerAction(id, data) {
+  return axios.post(`${API_BASE_URL}/customers/${id}/create-action/`, data)
+}
+
 // 获取客户详情
 export function getCustomer(id) {
   return axios.get(`${API_BASE_URL}/customers/${id}/`)

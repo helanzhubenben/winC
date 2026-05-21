@@ -19,7 +19,22 @@
 
           <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
             <el-form-item label="客户名称" prop="client_name">
-              <el-input v-model="form.client_name" placeholder="请输入客户名称" />
+              <el-autocomplete
+                v-model="form.client_name"
+                :fetch-suggestions="searchCustomerSuggestions"
+                clearable
+                placeholder="输入客户名称搜索客户池"
+                style="width: 100%"
+                @select="handleCustomerSelect"
+                @input="handleClientNameInput"
+              >
+                <template #default="{ item }">
+                  <div class="customer-option">
+                    <span>{{ item.value }}</span>
+                    <small>{{ item.region || '未填写区域' }} / {{ item.city || '未填写城市' }}</small>
+                  </div>
+                </template>
+              </el-autocomplete>
             </el-form-item>
 
             <el-form-item label="区域" prop="area">
@@ -219,6 +234,7 @@ import {
   updateAction,
   deleteAction
 } from '../api/weeklyReport'
+import { getCustomers } from '../api/customer'
 
 const router = useRouter()
 const route = useRoute()
@@ -229,6 +245,7 @@ const formRef = ref(null)
 const isNew = computed(() => route.params.id === 'new')
 
 const form = reactive({
+  customer: null,
   client_name: '',
   area: '',
   address: '',
@@ -262,6 +279,7 @@ const actionForm = reactive({
   result: '',
   next_step: ''
 })
+const selectedCustomerName = ref('')
 
 const actionRules = {
   action_date: [{ required: true, message: '请选择行动日期', trigger: 'change' }],
@@ -275,6 +293,7 @@ const loadReport = async () => {
   try {
     const response = await getWeeklyReport(route.params.id)
     Object.assign(form, response.data)
+    selectedCustomerName.value = form.customer ? form.client_name : ''
   } catch (error) {
     ElMessage.error('加载报告失败')
     console.error(error)
@@ -311,6 +330,48 @@ const handleSave = async () => {
     }
   } finally {
     loading.value = false
+  }
+}
+
+const searchCustomerSuggestions = async (queryString, callback) => {
+  const search = String(queryString || '').trim()
+  if (!search) {
+    callback([])
+    return
+  }
+
+  try {
+    const response = await getCustomers({
+      search,
+      page: 1,
+      page_size: 20
+    })
+    const results = response.data?.results ?? response.data ?? []
+    callback(results.map(customer => ({
+      value: customer.name,
+      id: customer.id,
+      region: customer.region,
+      city: customer.city,
+      address: customer.address
+    })))
+  } catch (error) {
+    callback([])
+    console.error(error)
+  }
+}
+
+const handleCustomerSelect = (item) => {
+  selectedCustomerName.value = item.value
+  form.customer = item.id
+  form.client_name = item.value
+  form.area = item.region || ''
+  form.address = item.address || ''
+}
+
+const handleClientNameInput = (value) => {
+  if (value !== selectedCustomerName.value) {
+    selectedCustomerName.value = ''
+    form.customer = null
   }
 }
 
@@ -447,6 +508,21 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.customer-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+}
+
+.customer-option span {
+  color: #111827;
+}
+
+.customer-option small {
+  color: #6b7280;
 }
 
 .action-card {

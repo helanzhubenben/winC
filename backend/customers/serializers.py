@@ -125,6 +125,7 @@ class CustomerListSerializer(serializers.ModelSerializer):
             'business_model',
             'region',
             'city',
+            'address',
             'level',
             'score_x',
             'score_y',

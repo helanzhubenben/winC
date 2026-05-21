@@ -5,6 +5,10 @@
         <span class="page-title">{{ customer.name || '客户详情' }}</span>
       </template>
       <template #extra>
+        <el-button type="primary" @click="handleCreateAction">
+          <el-icon><Plus /></el-icon>
+          创建 Action
+        </el-button>
         <el-button type="primary" @click="handleEdit">编辑</el-button>
         <el-button type="danger" @click="handleDelete">删除</el-button>
       </template>
@@ -192,6 +196,109 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="actionFormVisible"
+      title="创建 Action"
+      width="680px"
+      destroy-on-close
+      @close="resetActionForm"
+    >
+      <el-form ref="actionFormRef" :model="actionForm" :rules="actionRules" label-width="100px">
+        <el-divider content-position="left">自动关联</el-divider>
+        <el-form-item label="客户名称">
+          <el-input :model-value="customer.name || ''" disabled />
+        </el-form-item>
+        <el-form-item label="区域">
+          <el-input :model-value="customer.region || ''" disabled />
+        </el-form-item>
+        <el-form-item label="地址">
+          <el-input :model-value="customer.address || ''" disabled />
+        </el-form-item>
+
+        <el-divider content-position="left">项目与行动</el-divider>
+        <el-form-item label="任务" prop="tasks">
+          <el-input
+            v-model="actionForm.tasks"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入任务描述"
+          />
+        </el-form-item>
+        <el-form-item label="项目定义" prop="definition">
+          <el-input
+            v-model="actionForm.definition"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入项目定义"
+          />
+        </el-form-item>
+        <el-form-item label="到期日期" prop="due_date">
+          <el-date-picker
+            v-model="actionForm.due_date"
+            type="date"
+            placeholder="选择到期日期"
+            format="YYYY-MM-DD"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="责任人" prop="responsibility">
+          <el-input v-model="actionForm.responsibility" placeholder="请输入责任人" />
+        </el-form-item>
+        <el-form-item label="收入">
+          <el-input v-model="actionForm.revenue" placeholder="请输入收入" />
+        </el-form-item>
+        <el-form-item label="Action日期" prop="action_date">
+          <el-date-picker
+            v-model="actionForm.action_date"
+            type="date"
+            placeholder="选择 Action 日期"
+            format="YYYY-MM-DD"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="Action内容" prop="action">
+          <el-input
+            v-model="actionForm.action"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入 Action 内容"
+          />
+        </el-form-item>
+        <el-form-item label="结果">
+          <el-input
+            v-model="actionForm.result"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入结果"
+          />
+        </el-form-item>
+        <el-form-item label="下一步">
+          <el-input
+            v-model="actionForm.next_step"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入下一步计划"
+          />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="actionForm.remark"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入备注"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="actionFormVisible = false">取消</el-button>
+        <el-button type="primary" :loading="actionSaving" @click="handleActionSubmit">
+          创建
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -201,7 +308,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
-import { deleteCustomer, getCustomer } from '../api/customer'
+import { createCustomerAction, deleteCustomer, getCustomer } from '../api/customer'
 import { deleteContact, getContacts } from '../api/contactApi'
 import { createCustomerRevenue, getCustomerRevenues } from '../api/customerRevenue'
 import CustomerDialog from '../components/CustomerDialog.vue'
@@ -226,10 +333,34 @@ const revenueForm = ref({
   month: '',
   revenue: ''
 })
+const actionFormVisible = ref(false)
+const actionSaving = ref(false)
+const actionFormRef = ref(null)
+const actionForm = ref({
+  tasks: '',
+  definition: '',
+  due_date: '',
+  responsibility: '',
+  revenue: '',
+  remark: '',
+  action_date: '',
+  action: '',
+  result: '',
+  next_step: ''
+})
 
 const revenueRules = {
   month: [{ required: true, message: '请选择月份', trigger: 'change' }],
   revenue: [{ required: true, message: '请输入营收金额', trigger: 'blur' }]
+}
+
+const actionRules = {
+  tasks: [{ required: true, message: '请输入任务描述', trigger: 'blur' }],
+  definition: [{ required: true, message: '请输入项目定义', trigger: 'blur' }],
+  due_date: [{ required: true, message: '请选择到期日期', trigger: 'change' }],
+  responsibility: [{ required: true, message: '请输入责任人', trigger: 'blur' }],
+  action_date: [{ required: true, message: '请选择 Action 日期', trigger: 'change' }],
+  action: [{ required: true, message: '请输入 Action 内容', trigger: 'blur' }]
 }
 
 const getLevelType = (level) => {
@@ -262,6 +393,13 @@ const formatCurrency = (value) => {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   })
+}
+
+const formatLocalDate = (value = new Date()) => {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 const initChart = () => {
@@ -357,6 +495,46 @@ const handleBack = () => {
 
 const handleEdit = () => {
   formVisible.value = true
+}
+
+const resetActionForm = () => {
+  actionForm.value = {
+    tasks: '',
+    definition: '',
+    due_date: '',
+    responsibility: '',
+    revenue: '',
+    remark: '',
+    action_date: formatLocalDate(),
+    action: '',
+    result: '',
+    next_step: ''
+  }
+  actionFormRef.value?.clearValidate()
+}
+
+const handleCreateAction = () => {
+  resetActionForm()
+  actionFormVisible.value = true
+}
+
+const handleActionSubmit = async () => {
+  try {
+    await actionFormRef.value.validate()
+    actionSaving.value = true
+    const response = await createCustomerAction(route.params.id, actionForm.value)
+    ElMessage.success('Action 创建成功')
+    actionFormVisible.value = false
+    router.push(`/weekly-reports/${response.data.id}`)
+  } catch (error) {
+    if (error !== false) {
+      const message = error?.response?.data?.error || 'Action 创建失败'
+      ElMessage.error(message)
+      console.error(error)
+    }
+  } finally {
+    actionSaving.value = false
+  }
 }
 
 const handleDelete = async () => {
