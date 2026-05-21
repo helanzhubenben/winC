@@ -78,6 +78,21 @@
           accept=".xlsx,.csv"
           @change="handleRevenueFileChange"
         />
+        <input
+          ref="customerFileInput"
+          class="hidden-file-input"
+          type="file"
+          accept=".xlsx"
+          @change="handleCustomerFileChange"
+        />
+        <el-button :loading="templateDownloading" @click="handleDownloadCustomerTemplate">
+          <el-icon><Download /></el-icon>
+          下载模板
+        </el-button>
+        <el-button :loading="customerImporting" @click="handleCustomerImportClick">
+          <el-icon><Upload /></el-icon>
+          导入客户
+        </el-button>
         <el-button :loading="revenueImporting" @click="handleRevenueImportClick">
           <el-icon><Upload /></el-icon>
           导入营收
@@ -172,7 +187,7 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Download, Plus, Search, Upload } from '@element-plus/icons-vue'
-import { getCustomers } from '../api/customer'
+import { downloadCustomerImportTemplate, getCustomers, importCustomers } from '../api/customer'
 import { importCustomerRevenues } from '../api/customerRevenue'
 import { exportWorkbook } from '../api/export'
 import CustomerDialog from '../components/CustomerDialog.vue'
@@ -184,7 +199,10 @@ const total = ref(0)
 const formVisible = ref(false)
 const currentCustomer = ref(null)
 const revenueFileInput = ref(null)
+const customerFileInput = ref(null)
 const revenueImporting = ref(false)
+const customerImporting = ref(false)
+const templateDownloading = ref(false)
 const exporting = ref(false)
 
 const searchParams = ref({
@@ -246,6 +264,59 @@ const handlePageSizeChange = () => {
 const handleAdd = () => {
   currentCustomer.value = null
   formVisible.value = true
+}
+
+const handleCustomerImportClick = () => {
+  customerFileInput.value?.click()
+}
+
+const handleDownloadCustomerTemplate = async () => {
+  templateDownloading.value = true
+  try {
+    const response = await downloadCustomerImportTemplate()
+    downloadBlob(response.data, 'customer_import_template.xlsx')
+    ElMessage.success('模板下载完成')
+  } catch (error) {
+    ElMessage.error('模板下载失败')
+    console.error(error)
+  } finally {
+    templateDownloading.value = false
+  }
+}
+
+const handleCustomerFileChange = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) {
+    return
+  }
+
+  customerImporting.value = true
+  try {
+    const response = await importCustomers(file)
+    const {
+      customers_created = 0,
+      customers_updated = 0,
+      contacts_created = 0,
+      contacts_updated = 0,
+      skipped = 0,
+      warnings = []
+    } = response.data ?? {}
+
+    ElMessage.success(
+      `导入完成：客户新增 ${customers_created}，客户更新 ${customers_updated}，联系人新增 ${contacts_created}，联系人更新 ${contacts_updated}，跳过 ${skipped}`
+    )
+    if (warnings.length) {
+      console.warn('客户导入警告', warnings)
+    }
+    fetchCustomers()
+  } catch (error) {
+    const message = error?.response?.data?.error || '客户导入失败'
+    ElMessage.error(message)
+    console.error(error)
+  } finally {
+    customerImporting.value = false
+    event.target.value = ''
+  }
 }
 
 const handleRevenueImportClick = () => {

@@ -2,6 +2,7 @@ import csv
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO, StringIO
+from pathlib import Path
 
 from django.http import HttpResponse
 from openpyxl import Workbook, load_workbook
@@ -20,6 +21,31 @@ from .serializers import (
 
 REVENUE_REQUIRED_COLUMNS = {'month', 'customer name', 'revenue'}
 EXCEL_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+CUSTOMER_IMPORT_SHEET_NAME = '客户导入'
+CUSTOMER_IMPORT_COLUMNS = [
+    '客户名称',
+    '业务模式',
+    '区域',
+    '城市',
+    '地址',
+    'X轴描述',
+    'X轴评分',
+    'Y轴描述',
+    'Y轴评分',
+    'Z轴描述',
+    'Z轴评分',
+    '客户策略',
+    '潜在贡献',
+    '备注',
+    '联系人姓名',
+    '联系人职位',
+    '联系人电话',
+    '联系人邮箱',
+    '是否关键人',
+]
+CUSTOMER_IMPORT_BUSINESS_MODELS = {'Hunting', 'Farming'}
+CUSTOMER_IMPORT_TRUE_VALUES = {'是', 'y', 'yes', 'true', '1'}
+CUSTOMER_IMPORT_FALSE_VALUES = {'否', 'n', 'no', 'false', '0'}
 
 
 def _xlsx_response(workbook, filename):
@@ -33,8 +59,24 @@ def _xlsx_response(workbook, filename):
     return response
 
 
+def _repo_root():
+    return Path(__file__).resolve().parents[2]
+
+
+def _customer_import_template_path():
+    return _repo_root() / 'docs' / 'templates' / 'customer_import_template.xlsx'
+
+
 def _normalize_header(value):
     return str(value or '').strip().lower()
+
+
+def _blank(value):
+    return value is None or str(value).strip() == ''
+
+
+def _trimmed(value):
+    return str(value or '').strip()
 
 
 def _format_export_date(value):
@@ -237,6 +279,228 @@ def _parse_revenue(value):
         raise ValueError('revenue 必须是数字') from exc
 
 
+def _read_customer_import_rows(upload):
+    if not upload.name.lower().endswith('.xlsx'):
+        raise ValueError('仅支持 .xlsx 文件')
+
+    try:
+        workbook = load_workbook(upload, read_only=True, data_only=True)
+    except Exception as exc:
+        raise ValueError('文件无法读取，请确认是有效的 .xlsx 文件') from exc
+
+    sheet = workbook[CUSTOMER_IMPORT_SHEET_NAME] if CUSTOMER_IMPORT_SHEET_NAME in workbook.sheetnames else workbook.active
+    header_row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_row:
+        workbook.close()
+        raise ValueError('文件缺少表头')
+
+    headers = {_trimmed(name): index for index, name in enumerate(header_row) if not _blank(name)}
+    missing = [column for column in CUSTOMER_IMPORT_COLUMNS if column not in headers]
+    if missing:
+        workbook.close()
+        raise ValueError(f"缺少字段: {', '.join(missing)}")
+
+    rows = []
+    for row_number, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+        if all(_blank(value) for value in values):
+            continue
+        rows.append((
+            row_number,
+            {
+                column: values[headers[column]] if headers[column] < len(values) else None
+                for column in CUSTOMER_IMPORT_COLUMNS
+            }
+        ))
+
+    workbook.close()
+    return rows
+
+
+def _parse_required_text(row, column):
+    value = _trimmed(row.get(column))
+    if not value:
+        raise ValueError(f'{column}不能为空')
+    return value
+
+
+def _parse_optional_text(row, column):
+    return _trimmed(row.get(column))
+
+
+def _parse_score(row, column):
+    raw_value = row.get(column)
+    if _blank(raw_value):
+        raise ValueError(f'{column}不能为空')
+    try:
+        score = Decimal(str(raw_value).strip())
+    except InvalidOperation as exc:
+        raise ValueError(f'{column}必须是 0-100 的数字') from exc
+    if score < 0 or score > 100:
+        raise ValueError(f'{column}必须是 0-100 的数字')
+    if score != score.to_integral_value():
+        raise ValueError(f'{column}必须是整数')
+    return int(score)
+
+
+def _parse_optional_decimal(row, column):
+    raw_value = row.get(column)
+    if _blank(raw_value):
+        return None
+    try:
+        return Decimal(str(raw_value).strip().replace(',', ''))
+    except InvalidOperation as exc:
+        raise ValueError(f'{column}必须是数字') from exc
+
+
+def _parse_boolean(row, column):
+    raw_value = row.get(column)
+    if _blank(raw_value):
+        return False
+
+    value = str(raw_value).strip().lower()
+    if value in CUSTOMER_IMPORT_TRUE_VALUES:
+        return True
+    if value in CUSTOMER_IMPORT_FALSE_VALUES:
+        return False
+    raise ValueError(f'{column}必须是 是/否、Y/N、true/false 或 1/0')
+
+
+def _calculate_customer_level(score_x, score_y, score_z):
+    if score_x >= 70 and score_y >= 70 and score_z >= 70:
+        return 'A'
+    high_score_count = sum([score_x >= 70, score_y >= 70, score_z >= 70])
+    if high_score_count >= 2:
+        return 'B'
+    if score_x >= 70:
+        return 'C'
+    return 'D'
+
+
+def _parse_customer_import_row(row):
+    business_model = _parse_required_text(row, '业务模式')
+    if business_model not in CUSTOMER_IMPORT_BUSINESS_MODELS:
+        raise ValueError('业务模式必须是 Hunting 或 Farming')
+
+    score_x = _parse_score(row, 'X轴评分')
+    score_y = _parse_score(row, 'Y轴评分')
+    score_z = _parse_score(row, 'Z轴评分')
+
+    customer_name = _parse_required_text(row, '客户名称')
+    customer_data = {
+        'business_model': business_model,
+        'area': _parse_required_text(row, '区域'),
+        'city': _parse_required_text(row, '城市'),
+        'address': _parse_optional_text(row, '地址'),
+        'description_x': _parse_optional_text(row, 'X轴描述'),
+        'score_x': score_x,
+        'description_y': _parse_optional_text(row, 'Y轴描述'),
+        'score_y': score_y,
+        'key_person': _parse_optional_text(row, 'Z轴描述'),
+        'score_z': score_z,
+        'level': _calculate_customer_level(score_x, score_y, score_z),
+        'client_strategy': _parse_optional_text(row, '客户策略'),
+        'potential_contribution': _parse_optional_decimal(row, '潜在贡献'),
+        'remark': _parse_optional_text(row, '备注'),
+    }
+
+    contact_name = _parse_optional_text(row, '联系人姓名')
+    contact_data = None
+    if contact_name:
+        contact_data = {
+            'name': contact_name,
+            'position': _parse_optional_text(row, '联系人职位'),
+            'phone': _parse_optional_text(row, '联系人电话'),
+            'email': _parse_optional_text(row, '联系人邮箱'),
+            'is_key_person': _parse_boolean(row, '是否关键人'),
+        }
+
+    return customer_name, customer_data, contact_data
+
+
+def _customer_data_changed(first_data, current_data):
+    return any(first_data.get(key) != current_data.get(key) for key in first_data.keys())
+
+
+def _import_customer_and_contact_rows(rows):
+    customers_created = 0
+    customers_updated = 0
+    contacts_created = 0
+    contacts_updated = 0
+    skipped = 0
+    errors = []
+    warnings = []
+    customer_cache = {}
+    first_customer_data = {}
+    warned_customers = set()
+
+    for row_number, row in rows:
+        try:
+            customer_name, customer_data, contact_data = _parse_customer_import_row(row)
+        except ValueError as exc:
+            skipped += 1
+            errors.append({
+                'row': row_number,
+                'customer_name': _trimmed(row.get('客户名称')),
+                'contact_name': _trimmed(row.get('联系人姓名')),
+                'reason': str(exc),
+            })
+            continue
+
+        if customer_name in customer_cache:
+            customer = customer_cache[customer_name]
+            if (
+                customer_name not in warned_customers and
+                _customer_data_changed(first_customer_data[customer_name], customer_data)
+            ):
+                warnings.append({
+                    'row': row_number,
+                    'customer_name': customer_name,
+                    'reason': '重复客户行的客户字段与第一次出现不一致，已保留第一次出现的客户字段',
+                })
+                warned_customers.add(customer_name)
+        else:
+            customer = Customer.objects.filter(client_name=customer_name).first()
+            created = customer is None
+            if created:
+                customer = Customer.objects.create(client_name=customer_name, **customer_data)
+            else:
+                for field, value in customer_data.items():
+                    setattr(customer, field, value)
+                customer.save()
+            customer_cache[customer_name] = customer
+            first_customer_data[customer_name] = customer_data
+            if created:
+                customers_created += 1
+            else:
+                customers_updated += 1
+
+        if contact_data:
+            contact = Contact.objects.filter(customer=customer, name=contact_data['name']).first()
+            created = contact is None
+            if created:
+                Contact.objects.create(customer=customer, **contact_data)
+            else:
+                contact.position = contact_data['position']
+                contact.phone = contact_data['phone']
+                contact.email = contact_data['email']
+                contact.is_key_person = contact_data['is_key_person']
+                contact.save()
+            if created:
+                contacts_created += 1
+            else:
+                contacts_updated += 1
+
+    return {
+        'customers_created': customers_created,
+        'customers_updated': customers_updated,
+        'contacts_created': contacts_created,
+        'contacts_updated': contacts_updated,
+        'skipped': skipped,
+        'errors': errors[:50],
+        'warnings': warnings[:50],
+    }
+
+
 class CustomerViewSet(viewsets.ModelViewSet):
     """客户视图集"""
 
@@ -309,6 +573,35 @@ class CustomerViewSet(viewsets.ModelViewSet):
         workbook = Workbook()
         _add_customers_sheet(workbook, queryset)
         return _xlsx_response(workbook, 'customers.xlsx')
+
+    @action(detail=False, methods=['get'], url_path='import-template')
+    def import_template(self, request):
+        template_path = _customer_import_template_path()
+        if not template_path.exists():
+            return Response({'error': '客户导入模板不存在'}, status=status.HTTP_404_NOT_FOUND)
+
+        response = HttpResponse(template_path.read_bytes(), content_type=EXCEL_CONTENT_TYPE)
+        response['Content-Disposition'] = 'attachment; filename="customer_import_template.xlsx"'
+        return response
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='import',
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def import_file(self, request):
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'error': '请上传文件'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            rows = _read_customer_import_rows(upload)
+            result = _import_customer_and_contact_rows(rows)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(result)
 
 
 class ContactViewSet(viewsets.ModelViewSet):

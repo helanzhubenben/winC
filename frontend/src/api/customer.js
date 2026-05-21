@@ -14,6 +14,22 @@ export function exportCustomers(params) {
   })
 }
 
+export function downloadCustomerImportTemplate() {
+  return axios.get(`${API_BASE_URL}/customers/import-template/`, {
+    responseType: 'blob'
+  })
+}
+
+export function importCustomers(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return axios.post(`${API_BASE_URL}/customers/import/`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+}
+
 // 获取客户详情
 export function getCustomer(id) {
   return axios.get(`${API_BASE_URL}/customers/${id}/`)

@@ -763,7 +763,7 @@ const handleCancel = () => {
 
 <style scoped>
 .action-timeline {
-  height: 100%;
+  height: 100%;/re
   display: flex;
   flex-direction: column;
 }
