@@ -330,7 +330,7 @@ def _parse_optional_text(row, column):
 def _parse_score(row, column):
     raw_value = row.get(column)
     if _blank(raw_value):
-        raise ValueError(f'{column}不能为空')
+        return 0
     try:
         score = Decimal(str(raw_value).strip())
     except InvalidOperation as exc:
@@ -388,8 +388,8 @@ def _parse_customer_import_row(row):
     customer_name = _parse_required_text(row, '客户名称')
     customer_data = {
         'business_model': business_model,
-        'area': _parse_required_text(row, '区域'),
-        'city': _parse_required_text(row, '城市'),
+        'area': _parse_optional_text(row, '区域'),
+        'city': _parse_optional_text(row, '城市'),
         'address': _parse_optional_text(row, '地址'),
         'description_x': _parse_optional_text(row, 'X轴描述'),
         'score_x': score_x,

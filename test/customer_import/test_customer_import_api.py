@@ -227,6 +227,82 @@ class CustomerImportApiTests(APITestCase):
         self.assertEqual(contact.email, 'new@example.com')
         self.assertTrue(contact.is_key_person)
 
+    def test_import_treats_blank_scores_as_zero(self):
+        upload = make_import_upload([
+            [
+                '空评分客户',
+                'Hunting',
+                '华东',
+                '上海',
+                '上海市测试路4号',
+                '空评分应默认 0',
+                '',
+                '空评分应默认 0',
+                '',
+                '空评分应默认 0',
+                '',
+                '继续导入',
+                '',
+                '评分为空也应创建客户',
+                '赵七',
+                '联系人',
+                '13800000006',
+                'zhaoqi@example.com',
+                '是',
+            ],
+        ])
+
+        response = self.client.post('/api/customers/import/', {'file': upload}, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['customers_created'], 1)
+        self.assertEqual(response.data['contacts_created'], 1)
+        self.assertEqual(response.data['skipped'], 0)
+        self.assertEqual(response.data['errors'], [])
+
+        customer = Customer.objects.get(client_name='空评分客户')
+        self.assertEqual(customer.score_x, 0)
+        self.assertEqual(customer.score_y, 0)
+        self.assertEqual(customer.score_z, 0)
+        self.assertEqual(customer.level, 'D')
+
+    def test_import_allows_blank_area_and_city(self):
+        upload = make_import_upload([
+            [
+                '空区域城市客户',
+                'Farming',
+                '',
+                '',
+                '地址可填',
+                '描述',
+                70,
+                '描述',
+                70,
+                '描述',
+                70,
+                '策略',
+                '',
+                '区域城市为空也应导入',
+                '',
+                '',
+                '',
+                '',
+                '',
+            ],
+        ])
+
+        response = self.client.post('/api/customers/import/', {'file': upload}, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['customers_created'], 1)
+        self.assertEqual(response.data['skipped'], 0)
+        self.assertEqual(response.data['errors'], [])
+
+        customer = Customer.objects.get(client_name='空区域城市客户')
+        self.assertEqual(customer.area, '')
+        self.assertEqual(customer.city, '')
+        self.assertEqual(customer.level, 'A')
+
     def test_import_accepts_sample_customer_import_test_data_file(self):
         sample_path = Path(__file__).resolve().parents[2] / 'docs' / 'templates' / 'customer_import_test_data.xlsx'
         upload = SimpleUploadedFile(
