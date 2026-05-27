@@ -25,6 +25,9 @@
             <el-descriptions-item label="客户名称">
               {{ customer.name }}
             </el-descriptions-item>
+            <el-descriptions-item label="别名">
+              {{ customer.alias || '暂无' }}
+            </el-descriptions-item>
             <el-descriptions-item label="业务模式">
               {{ customer.business_model }}
             </el-descriptions-item>
@@ -299,4 +302,3 @@ onMounted(() => {
   align-items: center;
 }
 </style>
-

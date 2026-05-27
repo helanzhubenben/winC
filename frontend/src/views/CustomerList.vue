@@ -5,7 +5,7 @@
         <el-col :span="6">
           <el-input
             v-model="searchParams.search"
-            placeholder="搜索客户名称"
+            placeholder="搜索客户名称或别名"
             clearable
             @clear="handleSearch"
           >
@@ -83,6 +83,7 @@
           >
             <div class="card-header">
               <h3>{{ customer.name }}</h3>
+              <p v-if="customer.alias"><strong>别名：</strong>{{ customer.alias }}</p>
               <el-tag :type="getLevelType(customer.level)" size="large">
                 {{ customer.level }}
               </el-tag>
@@ -254,4 +255,3 @@ onMounted(() => {
   margin-top: 20px;
 }
 </style>
-

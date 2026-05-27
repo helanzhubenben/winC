@@ -8,6 +8,7 @@ class CustomerAdmin(admin.ModelAdmin):
 
     list_display = [
         'client_name',
+        'alias',
         'business_model',
         'area',
         'city',
@@ -20,13 +21,13 @@ class CustomerAdmin(admin.ModelAdmin):
         'updated_at'
     ]
     list_filter = ['level', 'business_model', 'area', 'city', 'status']
-    search_fields = ['client_name', 'address', 'remark']
+    search_fields = ['client_name', 'alias', 'address', 'remark']
     ordering = ['-updated_at']
     list_per_page = 20
 
     fieldsets = (
         ('基本信息', {
-            'fields': ('client_name', 'business_model', 'area', 'city', 'address')
+            'fields': ('client_name', 'alias', 'business_model', 'area', 'city', 'address')
         }),
         ('三维评分', {
             'fields': (

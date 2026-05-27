@@ -5,7 +5,7 @@
         <el-col :xs="24" :sm="12" :md="6">
           <el-input
             v-model="searchParams.search"
-            placeholder="搜索客户名称"
+            placeholder="搜索客户名称或别名"
             clearable
             @clear="handleSearch"
             @keyup.enter="handleSearch"
@@ -118,6 +118,7 @@
             <div class="card-header">
               <div>
                 <h3>{{ customer.name }}</h3>
+                <p v-if="customer.alias">别名：{{ customer.alias }}</p>
                 <p>{{ customer.region || '未填写区域' }} / {{ customer.city || '未填写城市' }}</p>
               </div>
               <el-tag :type="getLevelType(customer.level)" size="large">

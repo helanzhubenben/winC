@@ -21,6 +21,7 @@ class Customer(models.Model):
 
     # 基本信息
     client_name = models.CharField(max_length=200, verbose_name='客户名称', db_index=True)
+    alias = models.CharField(max_length=200, blank=True, verbose_name='别名', db_index=True)
     business_model = models.CharField(
         max_length=20,
         choices=BUSINESS_MODEL_CHOICES,

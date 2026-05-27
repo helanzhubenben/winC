@@ -14,6 +14,14 @@
           </el-form-item>
         </el-col>
         <el-col :span="12">
+          <el-form-item label="别名">
+            <el-input v-model="formData.alias" placeholder="请输入别名" />
+          </el-form-item>
+        </el-col>
+      </el-row>
+
+      <el-row :gutter="16">
+        <el-col :span="12">
           <el-form-item label="业务模式" prop="business_model">
             <el-select
               v-model="formData.business_model"
@@ -116,6 +124,7 @@ import { calculateLevel } from '../utils/level'
 
 const emptyForm = () => ({
   name: '',
+  alias: '',
   business_model: '',
   region: '',
   city: '',

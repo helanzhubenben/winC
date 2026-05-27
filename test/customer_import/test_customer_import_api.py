@@ -31,12 +31,22 @@ HEADERS = [
     '是否关键人',
 ]
 
+HEADERS_WITH_ALIAS = [
+    '客户名称',
+    '别名',
+    *HEADERS[1:],
+]
+
 
 def make_import_upload(rows):
+    return make_import_upload_with_headers(HEADERS, rows)
+
+
+def make_import_upload_with_headers(headers, rows):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = '客户导入'
-    sheet.append(HEADERS)
+    sheet.append(headers)
     for row in rows:
         sheet.append(row)
 
@@ -65,7 +75,40 @@ class CustomerImportApiTests(APITestCase):
         self.assertEqual(workbook.sheetnames, ['客户导入'])
         headers = [cell.value for cell in next(workbook['客户导入'].iter_rows(min_row=1, max_row=1))]
         workbook.close()
-        self.assertEqual(headers, HEADERS)
+        self.assertEqual(headers, HEADERS_WITH_ALIAS)
+
+    def test_import_sets_customer_alias_from_alias_column(self):
+        upload = make_import_upload_with_headers(HEADERS_WITH_ALIAS, [
+            [
+                '别名导入客户',
+                '客户简称A',
+                'Hunting',
+                '华东',
+                '上海',
+                '上海市测试路10号',
+                '客户潜力高',
+                80,
+                '竞争环境可控',
+                70,
+                '关键人关系较好',
+                60,
+                '重点跟进',
+                100,
+                '带别名导入',
+                '',
+                '',
+                '',
+                '',
+                '',
+            ],
+        ])
+
+        response = self.client.post('/api/customers/import/', {'file': upload}, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['customers_created'], 1)
+        customer = Customer.objects.get(client_name='别名导入客户')
+        self.assertEqual(customer.alias, '客户简称A')
 
     def test_import_creates_customer_contacts_and_keeps_first_duplicate_customer_values(self):
         upload = make_import_upload([

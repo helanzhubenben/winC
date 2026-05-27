@@ -30,6 +30,19 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertEqual(response.data['count'], 1)
         self.assertEqual(response.data['results'][0]['name'], self.customer_b.client_name)
 
+    def test_customer_list_respects_page_size_query_param(self):
+        for index in range(23):
+            Customer.objects.create(
+                client_name=f'Paged Customer {index}',
+                business_model='Hunting',
+            )
+
+        response = self.client.get('/api/customers/', {'page': 3, 'page_size': 12})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 25)
+        self.assertEqual(len(response.data['results']), 1)
+
     def test_contact_list_is_not_paginated(self):
         for index in range(21):
             Contact.objects.create(

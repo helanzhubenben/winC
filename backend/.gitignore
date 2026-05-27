@@ -46,3 +46,7 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+
+# templates
+templates/revenue_import_test_template.xlsx
+templates/mapping.xlsx

@@ -24,6 +24,7 @@ EXCEL_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetm
 CUSTOMER_IMPORT_SHEET_NAME = '客户导入'
 CUSTOMER_IMPORT_COLUMNS = [
     '客户名称',
+    '别名',
     '业务模式',
     '区域',
     '城市',
@@ -43,6 +44,7 @@ CUSTOMER_IMPORT_COLUMNS = [
     '联系人邮箱',
     '是否关键人',
 ]
+CUSTOMER_IMPORT_REQUIRED_COLUMNS = [column for column in CUSTOMER_IMPORT_COLUMNS if column != '别名']
 CUSTOMER_IMPORT_BUSINESS_MODELS = {'Hunting', 'Farming'}
 CUSTOMER_IMPORT_TRUE_VALUES = {'是', 'y', 'yes', 'true', '1'}
 CUSTOMER_IMPORT_FALSE_VALUES = {'否', 'n', 'no', 'false', '0'}
@@ -92,6 +94,7 @@ def _add_customers_sheet(workbook, queryset=None):
     sheet.title = '客户池'
     sheet.append([
         '客户名称',
+        '别名',
         '业务模式',
         '区域',
         '城市',
@@ -111,6 +114,7 @@ def _add_customers_sheet(workbook, queryset=None):
     for item in serializer.data:
         sheet.append([
             item.get('name', ''),
+            item.get('alias', ''),
             item.get('business_model', ''),
             item.get('region', ''),
             item.get('city', ''),
@@ -295,7 +299,7 @@ def _read_customer_import_rows(upload):
         raise ValueError('文件缺少表头')
 
     headers = {_trimmed(name): index for index, name in enumerate(header_row) if not _blank(name)}
-    missing = [column for column in CUSTOMER_IMPORT_COLUMNS if column not in headers]
+    missing = [column for column in CUSTOMER_IMPORT_REQUIRED_COLUMNS if column not in headers]
     if missing:
         workbook.close()
         raise ValueError(f"缺少字段: {', '.join(missing)}")
@@ -307,7 +311,11 @@ def _read_customer_import_rows(upload):
         rows.append((
             row_number,
             {
-                column: values[headers[column]] if headers[column] < len(values) else None
+                column: (
+                    values[headers[column]]
+                    if column in headers and headers[column] < len(values)
+                    else None
+                )
                 for column in CUSTOMER_IMPORT_COLUMNS
             }
         ))
@@ -387,6 +395,7 @@ def _parse_customer_import_row(row):
 
     customer_name = _parse_required_text(row, '客户名称')
     customer_data = {
+        'alias': _parse_optional_text(row, '别名'),
         'business_model': business_model,
         'area': _parse_optional_text(row, '区域'),
         'city': _parse_optional_text(row, '城市'),
@@ -508,7 +517,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     serializer_class = CustomerSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['level', 'area', 'city', 'business_model', 'status']
-    search_fields = ['client_name', 'address', 'remark']
+    search_fields = ['client_name', 'alias', 'address', 'remark']
     ordering_fields = ['created_at', 'updated_at', 'score_x', 'score_y', 'score_z', 'potential_contribution']
     ordering = ['-updated_at']
 

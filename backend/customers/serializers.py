@@ -77,6 +77,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'name',
+            'alias',
             'business_model',
             'region',
             'city',
@@ -122,6 +123,7 @@ class CustomerListSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'name',
+            'alias',
             'business_model',
             'region',
             'city',

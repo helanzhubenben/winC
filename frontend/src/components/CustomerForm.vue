@@ -15,6 +15,10 @@
         <el-input v-model="formData.name" placeholder="请输入客户名称" />
       </el-form-item>
 
+      <el-form-item label="别名">
+        <el-input v-model="formData.alias" placeholder="请输入别名" />
+      </el-form-item>
+
       <el-form-item label="业务模式" prop="business_model">
         <el-select v-model="formData.business_model" placeholder="请选择业务模式" style="width: 100%">
           <el-option label="Hunting" value="Hunting" />
@@ -122,6 +126,7 @@ const isEdit = computed(() => !!props.customer)
 
 const formData = ref({
   name: '',
+  alias: '',
   business_model: '',
   region: '',
   city: '',
@@ -180,6 +185,7 @@ const handleClose = () => {
 const resetForm = () => {
   formData.value = {
     name: '',
+    alias: '',
     business_model: '',
     region: '',
     city: '',
@@ -226,4 +232,3 @@ const handleSubmit = async () => {
   }
 }
 </script>
-
