@@ -1,10 +1,14 @@
 import csv
+import json
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO, StringIO
 from pathlib import Path
 
 from django.http import HttpResponse
+from django.db.models import Q, Sum
+from django.db.models.functions import Coalesce
+from django.utils.dateparse import parse_date
 from openpyxl import Workbook, load_workbook
 from rest_framework import viewsets, filters, status
 from rest_framework.decorators import action, api_view
@@ -12,7 +16,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
-from .models import Customer, Contact, CustomerRevenue, WeeklyReport
+from .models import Customer, Contact, CustomerRevenue, WeeklyReport, get_last_quarter_range
 from .serializers import (
     CustomerSerializer, CustomerListSerializer, ContactSerializer,
     CustomerRevenueSerializer, WeeklyReportSerializer, WeeklyReportListSerializer
@@ -48,6 +52,25 @@ CUSTOMER_IMPORT_REQUIRED_COLUMNS = [column for column in CUSTOMER_IMPORT_COLUMNS
 CUSTOMER_IMPORT_BUSINESS_MODELS = {'Hunting', 'Farming'}
 CUSTOMER_IMPORT_TRUE_VALUES = {'是', 'y', 'yes', 'true', '1'}
 CUSTOMER_IMPORT_FALSE_VALUES = {'否', 'n', 'no', 'false', '0'}
+CUSTOMER_FILTER_FIELDS = {
+    'client_name': {'type': 'text', 'field': 'client_name'},
+    'alias': {'type': 'text', 'field': 'alias'},
+    'business_model': {'type': 'choice', 'field': 'business_model'},
+    'area': {'type': 'text', 'field': 'area'},
+    'city': {'type': 'text', 'field': 'city'},
+    'level': {'type': 'choice', 'field': 'level'},
+    'status': {'type': 'choice', 'field': 'status'},
+    'address': {'type': 'text', 'field': 'address'},
+    'remark': {'type': 'text', 'field': 'remark'},
+    'score_x': {'type': 'number', 'field': 'score_x'},
+    'score_y': {'type': 'number', 'field': 'score_y'},
+    'score_z': {'type': 'number', 'field': 'score_z'},
+    'potential_contribution': {'type': 'number', 'field': 'potential_contribution'},
+    'created_at': {'type': 'date', 'field': 'created_at'},
+    'updated_at': {'type': 'date', 'field': 'updated_at'},
+    'last_year_revenue': {'type': 'computed_revenue', 'annotation': 'filtered_last_year_revenue'},
+    'last_quarter_revenue': {'type': 'computed_revenue', 'annotation': 'filtered_last_quarter_revenue'},
+}
 
 
 def _xlsx_response(workbook, filename):
@@ -87,6 +110,22 @@ def _format_export_date(value):
 
 def _format_export_datetime(value):
     return timezone.localtime(value).strftime('%Y-%m-%d %H:%M:%S') if value else ''
+
+
+def _last_year_range():
+    today = timezone.localdate()
+    start_date = today.replace(year=today.year - 1, month=1, day=1)
+    end_date = today.replace(year=today.year - 1, month=12, day=31)
+    return start_date, end_date
+
+
+def _parse_filter_decimal(value):
+    if _blank(value):
+        return None
+    try:
+        return Decimal(str(value).strip().replace(',', ''))
+    except InvalidOperation:
+        return None
 
 
 def _add_customers_sheet(workbook, queryset=None):
@@ -518,7 +557,23 @@ class CustomerViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['level', 'area', 'city', 'business_model', 'status']
     search_fields = ['client_name', 'alias', 'address', 'remark']
-    ordering_fields = ['created_at', 'updated_at', 'score_x', 'score_y', 'score_z', 'potential_contribution']
+    ordering_fields = [
+        'client_name',
+        'alias',
+        'business_model',
+        'area',
+        'city',
+        'level',
+        'status',
+        'score_x',
+        'score_y',
+        'score_z',
+        'potential_contribution',
+        'created_at',
+        'updated_at',
+        'last_year_revenue',
+        'last_quarter_revenue',
+    ]
     ordering = ['-updated_at']
 
     def get_serializer_class(self):
@@ -530,11 +585,136 @@ class CustomerViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """优化查询性能"""
         queryset = super().get_queryset()
+        queryset = self._apply_custom_filters(queryset)
+        queryset = self._annotate_custom_ordering(queryset)
         if self.action == 'list':
             queryset = queryset.prefetch_related('contacts', 'revenue_records')
         elif self.action == 'retrieve':
             queryset = queryset.prefetch_related('contacts', 'revenue_records')
         return queryset
+
+    def _annotate_custom_ordering(self, queryset):
+        ordering = _trimmed(self.request.query_params.get('ordering')).lstrip('-')
+        if ordering == 'last_year_revenue':
+            start_date, end_date = _last_year_range()
+            return queryset.annotate(last_year_revenue=self._revenue_sum_annotation(start_date, end_date))
+        if ordering == 'last_quarter_revenue':
+            start_date, end_date = get_last_quarter_range()
+            return queryset.annotate(last_quarter_revenue=self._revenue_sum_annotation(start_date, end_date))
+        return queryset
+
+    def _apply_custom_filters(self, queryset):
+        raw_filters = self.request.query_params.get('filters')
+        if not raw_filters:
+            return queryset
+
+        try:
+            filters_data = json.loads(raw_filters)
+        except (TypeError, ValueError):
+            return queryset
+        if not isinstance(filters_data, list):
+            return queryset
+
+        needs_last_year = any(item.get('field') == 'last_year_revenue' for item in filters_data if isinstance(item, dict))
+        needs_last_quarter = any(item.get('field') == 'last_quarter_revenue' for item in filters_data if isinstance(item, dict))
+        if needs_last_year or needs_last_quarter:
+            queryset = self._annotate_revenue_filters(queryset, needs_last_year, needs_last_quarter)
+
+        for item in filters_data:
+            if not isinstance(item, dict):
+                continue
+            field_name = item.get('field')
+            operator = item.get('operator')
+            value = item.get('value')
+            field_config = CUSTOMER_FILTER_FIELDS.get(field_name)
+            if not field_config:
+                continue
+            queryset = self._apply_custom_filter(queryset, field_config, operator, value)
+        return queryset
+
+    def _annotate_revenue_filters(self, queryset, needs_last_year, needs_last_quarter):
+        annotations = {}
+        if needs_last_year:
+            start_date, end_date = _last_year_range()
+            annotations['filtered_last_year_revenue'] = self._revenue_sum_annotation(start_date, end_date)
+        if needs_last_quarter:
+            start_date, end_date = get_last_quarter_range()
+            annotations['filtered_last_quarter_revenue'] = self._revenue_sum_annotation(start_date, end_date)
+        return queryset.annotate(**annotations) if annotations else queryset
+
+    def _revenue_sum_annotation(self, start_date, end_date):
+        return Coalesce(
+            Sum(
+                'revenue_records__revenue',
+                filter=Q(revenue_records__month__gte=start_date, revenue_records__month__lte=end_date),
+                default=Decimal('0'),
+            ),
+            Decimal('0'),
+        )
+
+    def _apply_custom_filter(self, queryset, field_config, operator, value):
+        field_type = field_config['type']
+        field = field_config.get('field') or field_config.get('annotation')
+
+        if field_type == 'text':
+            text = _trimmed(value)
+            if not text:
+                return queryset
+            if operator == 'eq':
+                return queryset.filter(**{f'{field}__iexact': text})
+            return queryset.filter(**{f'{field}__icontains': text})
+
+        if field_type == 'choice':
+            text = _trimmed(value)
+            if not text:
+                return queryset
+            return queryset.filter(**{field: text})
+
+        if field_type in {'number', 'computed_revenue'}:
+            return self._apply_decimal_filter(queryset, field, operator, value)
+
+        if field_type == 'date':
+            return self._apply_date_filter(queryset, field, operator, value)
+
+        return queryset
+
+    def _apply_decimal_filter(self, queryset, field, operator, value):
+        if operator == 'between' and isinstance(value, list) and len(value) >= 2:
+            low = _parse_filter_decimal(value[0])
+            high = _parse_filter_decimal(value[1])
+            if low is not None:
+                queryset = queryset.filter(**{f'{field}__gte': low})
+            if high is not None:
+                queryset = queryset.filter(**{f'{field}__lte': high})
+            return queryset
+
+        number = _parse_filter_decimal(value)
+        if number is None:
+            return queryset
+        if operator == 'lte':
+            return queryset.filter(**{f'{field}__lte': number})
+        if operator == 'eq':
+            return queryset.filter(**{field: number})
+        return queryset.filter(**{f'{field}__gte': number})
+
+    def _apply_date_filter(self, queryset, field, operator, value):
+        if operator == 'between' and isinstance(value, list) and len(value) >= 2:
+            start_date = parse_date(_trimmed(value[0]))
+            end_date = parse_date(_trimmed(value[1]))
+            if start_date:
+                queryset = queryset.filter(**{f'{field}__date__gte': start_date})
+            if end_date:
+                queryset = queryset.filter(**{f'{field}__date__lte': end_date})
+            return queryset
+
+        parsed = parse_date(_trimmed(value))
+        if not parsed:
+            return queryset
+        if operator == 'lte':
+            return queryset.filter(**{f'{field}__date__lte': parsed})
+        if operator == 'eq':
+            return queryset.filter(**{f'{field}__date': parsed})
+        return queryset.filter(**{f'{field}__date__gte': parsed})
 
     @action(detail=False, methods=['get'])
     def statistics(self, request):

@@ -3,6 +3,7 @@ from rest_framework.test import APITestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from io import BytesIO
+import json
 from openpyxl import load_workbook
 
 from .models import Contact, Customer, CustomerRevenue, WeeklyReport, get_last_quarter_range
@@ -29,6 +30,95 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 1)
         self.assertEqual(response.data['results'][0]['name'], self.customer_b.client_name)
+
+    def test_customer_list_applies_custom_text_choice_and_number_filters(self):
+        self.customer_a.alias = 'Alpha'
+        self.customer_a.score_x = 80
+        self.customer_a.potential_contribution = '120.00'
+        self.customer_a.save()
+        self.customer_b.alias = 'Beta'
+        self.customer_b.score_x = 40
+        self.customer_b.potential_contribution = '20.00'
+        self.customer_b.save()
+
+        filters = [
+            {'field': 'alias', 'operator': 'contains', 'value': 'alp'},
+            {'field': 'business_model', 'operator': 'eq', 'value': 'Hunting'},
+            {'field': 'score_x', 'operator': 'gte', 'value': '70'},
+            {'field': 'potential_contribution', 'operator': 'between', 'value': ['100', '130']},
+        ]
+        response = self.client.get('/api/customers/', {'filters': json.dumps(filters)})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['name'], self.customer_a.client_name)
+
+    def test_customer_list_applies_custom_computed_revenue_filters(self):
+        today = timezone.localdate()
+        last_year_month = today.replace(year=today.year - 1, month=5, day=1)
+        last_quarter_start, _ = get_last_quarter_range(today)
+
+        CustomerRevenue.objects.create(
+            customer=self.customer_a,
+            month=last_year_month,
+            revenue='1200.00',
+        )
+        CustomerRevenue.objects.create(
+            customer=self.customer_a,
+            month=last_quarter_start,
+            revenue='300.00',
+        )
+        CustomerRevenue.objects.create(
+            customer=self.customer_b,
+            month=last_year_month,
+            revenue='500.00',
+        )
+        CustomerRevenue.objects.create(
+            customer=self.customer_b,
+            month=last_quarter_start,
+            revenue='900.00',
+        )
+
+        filters = [
+            {'field': 'last_year_revenue', 'operator': 'gte', 'value': '1000'},
+            {'field': 'last_quarter_revenue', 'operator': 'lte', 'value': '500'},
+        ]
+        response = self.client.get('/api/customers/', {'filters': json.dumps(filters)})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['name'], self.customer_a.client_name)
+
+    def test_customer_list_orders_by_custom_filter_field(self):
+        self.customer_a.alias = 'Alpha'
+        self.customer_a.save()
+        self.customer_b.alias = 'Zulu'
+        self.customer_b.save()
+
+        response = self.client.get('/api/customers/', {'ordering': 'alias'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['results'][0]['name'], self.customer_a.client_name)
+        self.assertEqual(response.data['results'][1]['name'], self.customer_b.client_name)
+
+    def test_customer_list_orders_by_computed_revenue_field(self):
+        last_quarter_start, _ = get_last_quarter_range(timezone.localdate())
+        CustomerRevenue.objects.create(
+            customer=self.customer_a,
+            month=last_quarter_start,
+            revenue='300.00',
+        )
+        CustomerRevenue.objects.create(
+            customer=self.customer_b,
+            month=last_quarter_start,
+            revenue='900.00',
+        )
+
+        response = self.client.get('/api/customers/', {'ordering': 'last_quarter_revenue'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['results'][0]['name'], self.customer_a.client_name)
+        self.assertEqual(response.data['results'][1]['name'], self.customer_b.client_name)
 
     def test_customer_list_respects_page_size_query_param(self):
         for index in range(23):

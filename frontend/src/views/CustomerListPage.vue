@@ -2,7 +2,7 @@
   <div class="customer-list">
     <el-card class="toolbar-card" shadow="never">
       <el-row :gutter="16">
-        <el-col :xs="24" :sm="12" :md="6">
+        <el-col :xs="24" :md="10">
           <el-input
             v-model="searchParams.search"
             placeholder="搜索客户名称或别名"
@@ -15,56 +15,155 @@
             </template>
           </el-input>
         </el-col>
-        <el-col :xs="12" :sm="6" :md="4">
-          <el-select
-            v-model="searchParams.level"
-            placeholder="客户等级"
-            clearable
-            style="width: 100%"
-            @change="handleSearch"
-          >
-            <el-option label="Level A" value="A" />
-            <el-option label="Level B" value="B" />
-            <el-option label="Level C" value="C" />
-            <el-option label="Level D" value="D" />
-          </el-select>
-        </el-col>
-        <el-col :xs="12" :sm="6" :md="4">
-          <el-input
-            v-model="searchParams.area"
-            placeholder="区域"
-            clearable
-            @clear="handleSearch"
-            @keyup.enter="handleSearch"
-          />
-        </el-col>
-        <el-col :xs="12" :sm="6" :md="4">
-          <el-input
-            v-model="searchParams.city"
-            placeholder="城市"
-            clearable
-            @clear="handleSearch"
-            @keyup.enter="handleSearch"
-          />
-        </el-col>
-        <el-col :xs="12" :sm="6" :md="4">
-          <el-select
-            v-model="searchParams.business_model"
-            placeholder="业务模式"
-            clearable
-            style="width: 100%"
-            @change="handleSearch"
-          >
-            <el-option label="Hunting" value="Hunting" />
-            <el-option label="Farming" value="Farming" />
-          </el-select>
-        </el-col>
-        <el-col :xs="24" :sm="6" :md="2">
-          <el-button class="full-width" type="primary" @click="handleSearch">
-            搜索
-          </el-button>
+        <el-col :xs="24" :md="14">
+          <div class="filter-actions">
+            <el-button @click="handleAddFilter">
+              <el-icon><Plus /></el-icon>
+              添加筛选条件
+            </el-button>
+            <el-button @click="handleResetFilters">
+              <el-icon><Refresh /></el-icon>
+              重置
+            </el-button>
+            <el-button type="primary" @click="handleSearch">
+              <el-icon><Search /></el-icon>
+              搜索
+            </el-button>
+          </div>
         </el-col>
       </el-row>
+
+      <div v-if="filterConditions.length" class="filter-builder">
+        <div
+          v-for="condition in filterConditions"
+          :key="condition.id"
+          class="condition-row"
+        >
+          <el-select
+            v-model="condition.field"
+            class="condition-field"
+            placeholder="字段"
+            @change="handleFilterFieldChange(condition)"
+          >
+            <el-option
+              v-for="field in filterFields"
+              :key="field.value"
+              :label="field.label"
+              :value="field.value"
+            />
+          </el-select>
+          <el-select
+            v-model="condition.operator"
+            class="condition-operator"
+            placeholder="条件"
+            @change="handleFilterOperatorChange(condition)"
+          >
+            <el-option
+              v-for="operator in getOperators(condition)"
+              :key="operator.value"
+              :label="operator.label"
+              :value="operator.value"
+            />
+          </el-select>
+          <template v-if="condition.operator === 'between'">
+            <el-date-picker
+              v-if="getFieldType(condition.field) === 'date'"
+              v-model="condition.value[0]"
+              class="condition-value"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="开始日期"
+            />
+            <el-input
+              v-else
+              v-model="condition.value[0]"
+              class="condition-value"
+              placeholder="最小值"
+              @keyup.enter="handleSearch"
+            />
+            <el-date-picker
+              v-if="getFieldType(condition.field) === 'date'"
+              v-model="condition.value[1]"
+              class="condition-value"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="结束日期"
+            />
+            <el-input
+              v-else
+              v-model="condition.value[1]"
+              class="condition-value"
+              placeholder="最大值"
+              @keyup.enter="handleSearch"
+            />
+          </template>
+          <el-select
+            v-else-if="getFieldType(condition.field) === 'choice'"
+            v-model="condition.value"
+            class="condition-value-wide"
+            placeholder="请选择"
+            clearable
+          >
+            <el-option
+              v-for="option in getChoiceOptions(condition.field)"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+          <el-date-picker
+            v-else-if="getFieldType(condition.field) === 'date'"
+            v-model="condition.value"
+            class="condition-value-wide"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选择日期"
+          />
+          <el-input
+            v-else
+            v-model="condition.value"
+            class="condition-value-wide"
+            placeholder="请输入筛选值"
+            clearable
+            @keyup.enter="handleSearch"
+          />
+          <el-button
+            circle
+            type="danger"
+            @click="handleRemoveFilter(condition.id)"
+          >
+            <el-icon><Delete /></el-icon>
+          </el-button>
+        </div>
+      </div>
+
+      <div class="sort-builder">
+        <span class="sort-label">排序</span>
+        <el-select
+          v-model="sortState.field"
+          class="sort-field"
+          placeholder="选择排序字段"
+          clearable
+          @change="handleSearch"
+          @clear="handleSearch"
+        >
+          <el-option
+            v-for="field in sortableFields"
+            :key="field.value"
+            :label="field.label"
+            :value="field.value"
+          />
+        </el-select>
+        <el-select
+          v-model="sortState.direction"
+          class="sort-direction"
+          :disabled="!sortState.field"
+          @change="handleSearch"
+        >
+          <el-option label="升序" value="asc" />
+          <el-option label="降序" value="desc" />
+        </el-select>
+      </div>
 
       <div class="toolbar-actions">
         <el-button type="primary" @click="handleAdd">
@@ -187,7 +286,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Download, Plus, Search, Upload } from '@element-plus/icons-vue'
+import { Delete, Download, Plus, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import { downloadCustomerImportTemplate, getCustomers, importCustomers } from '../api/customer'
 import { importCustomerRevenues } from '../api/customerRevenue'
 import { exportWorkbook } from '../api/export'
@@ -205,13 +304,75 @@ const revenueImporting = ref(false)
 const customerImporting = ref(false)
 const templateDownloading = ref(false)
 const exporting = ref(false)
+const filterConditions = ref([])
+const sortState = ref({
+  field: '',
+  direction: 'desc'
+})
+
+const filterFields = [
+  { label: '客户名称', value: 'client_name', type: 'text' },
+  { label: '别名', value: 'alias', type: 'text' },
+  { label: '业务模式', value: 'business_model', type: 'choice' },
+  { label: '区域', value: 'area', type: 'text' },
+  { label: '城市', value: 'city', type: 'text' },
+  { label: '客户等级', value: 'level', type: 'choice' },
+  { label: 'X 轴评分', value: 'score_x', type: 'number' },
+  { label: 'Y 轴评分', value: 'score_y', type: 'number' },
+  { label: 'Z 轴评分', value: 'score_z', type: 'number' },
+  { label: '潜在贡献', value: 'potential_contribution', type: 'number' },
+  { label: '去年营收', value: 'last_year_revenue', type: 'number' },
+  { label: '上季度营收', value: 'last_quarter_revenue', type: 'number' },
+  { label: '状态', value: 'status', type: 'choice' },
+  { label: '地址', value: 'address', type: 'text' },
+  { label: '备注', value: 'remark', type: 'text' },
+  { label: '创建时间', value: 'created_at', type: 'date' },
+  { label: '更新时间', value: 'updated_at', type: 'date' }
+]
+
+const sortableFields = filterFields.filter((field) => !['address', 'remark'].includes(field.value))
+
+const operatorOptions = {
+  text: [
+    { label: '包含', value: 'contains' },
+    { label: '等于', value: 'eq' }
+  ],
+  choice: [
+    { label: '等于', value: 'eq' }
+  ],
+  number: [
+    { label: '大于等于', value: 'gte' },
+    { label: '小于等于', value: 'lte' },
+    { label: '等于', value: 'eq' },
+    { label: '区间', value: 'between' }
+  ],
+  date: [
+    { label: '晚于等于', value: 'gte' },
+    { label: '早于等于', value: 'lte' },
+    { label: '等于', value: 'eq' },
+    { label: '区间', value: 'between' }
+  ]
+}
+
+const choiceOptions = {
+  business_model: [
+    { label: 'Hunting', value: 'Hunting' },
+    { label: 'Farming', value: 'Farming' }
+  ],
+  level: [
+    { label: 'Level A', value: 'A' },
+    { label: 'Level B', value: 'B' },
+    { label: 'Level C', value: 'C' },
+    { label: 'Level D', value: 'D' }
+  ],
+  status: [
+    { label: 'Active', value: 'active' },
+    { label: 'Inactive', value: 'inactive' }
+  ]
+}
 
 const searchParams = ref({
   search: '',
-  level: '',
-  area: '',
-  city: '',
-  business_model: '',
   page: 1,
   page_size: 12
 })
@@ -234,10 +395,81 @@ const formatCurrency = (value) => {
   })
 }
 
+const getFieldConfig = (field) => {
+  return filterFields.find((item) => item.value === field) ?? filterFields[0]
+}
+
+const getFieldType = (field) => {
+  return getFieldConfig(field).type
+}
+
+const getOperators = (condition) => {
+  return operatorOptions[getFieldType(condition.field)] ?? operatorOptions.text
+}
+
+const getChoiceOptions = (field) => {
+  return choiceOptions[field] ?? []
+}
+
+const emptyFilterCondition = () => ({
+  id: `${Date.now()}-${Math.random()}`,
+  field: 'client_name',
+  operator: 'contains',
+  value: ''
+})
+
+const resetConditionValue = (condition) => {
+  condition.value = condition.operator === 'between' ? ['', ''] : ''
+}
+
+const handleAddFilter = () => {
+  filterConditions.value.push(emptyFilterCondition())
+}
+
+const handleRemoveFilter = (id) => {
+  filterConditions.value = filterConditions.value.filter((condition) => condition.id !== id)
+  handleSearch()
+}
+
+const handleFilterFieldChange = (condition) => {
+  const operators = getOperators(condition)
+  condition.operator = operators[0]?.value ?? 'contains'
+  resetConditionValue(condition)
+}
+
+const handleFilterOperatorChange = (condition) => {
+  resetConditionValue(condition)
+}
+
+const hasFilterValue = (condition) => {
+  if (condition.operator === 'between' && Array.isArray(condition.value)) {
+    return condition.value.some((value) => String(value ?? '').trim() !== '')
+  }
+  return String(condition.value ?? '').trim() !== ''
+}
+
+const buildCustomFilters = () => {
+  return filterConditions.value
+    .filter((condition) => condition.field && condition.operator && hasFilterValue(condition))
+    .map((condition) => ({
+      field: condition.field,
+      operator: condition.operator,
+      value: condition.value
+    }))
+}
+
 const fetchCustomers = async () => {
   loading.value = true
   try {
-    const response = await getCustomers(searchParams.value)
+    const params = { ...searchParams.value }
+    const filters = buildCustomFilters()
+    if (filters.length) {
+      params.filters = JSON.stringify(filters)
+    }
+    if (sortState.value.field) {
+      params.ordering = `${sortState.value.direction === 'desc' ? '-' : ''}${sortState.value.field}`
+    }
+    const response = await getCustomers(params)
     const results = response.data?.results ?? response.data ?? []
 
     customers.value = Array.isArray(results) ? results : []
@@ -254,6 +486,17 @@ const fetchCustomers = async () => {
 
 const handleSearch = () => {
   searchParams.value.page = 1
+  fetchCustomers()
+}
+
+const handleResetFilters = () => {
+  searchParams.value.search = ''
+  searchParams.value.page = 1
+  filterConditions.value = []
+  sortState.value = {
+    field: '',
+    direction: 'desc'
+  }
   fetchCustomers()
 }
 
@@ -392,6 +635,74 @@ onMounted(() => {
   border-radius: 20px;
 }
 
+.filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.sort-builder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.sort-label {
+  color: #4b5563;
+  font-size: 14px;
+}
+
+.sort-field {
+  width: 220px;
+}
+
+.sort-direction {
+  width: 110px;
+}
+
+.condition-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.condition-field {
+  width: 150px;
+  flex: 0 0 150px;
+}
+
+.condition-operator {
+  width: 120px;
+  flex: 0 0 120px;
+}
+
+.condition-value {
+  width: 160px;
+  flex: 1 1 140px;
+}
+
+.condition-value-wide {
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
 .toolbar-actions {
   display: flex;
   justify-content: flex-end;
@@ -489,7 +800,30 @@ onMounted(() => {
   margin-top: 4px;
 }
 
-.full-width {
-  width: 100%;
+@media (max-width: 768px) {
+  .filter-actions {
+    justify-content: flex-start;
+    margin-top: 12px;
+  }
+
+  .condition-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .condition-field,
+  .condition-operator,
+  .condition-value,
+  .condition-value-wide,
+  .sort-field,
+  .sort-direction {
+    width: 100%;
+    flex: 1 1 auto;
+  }
+
+  .sort-builder {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 </style>
