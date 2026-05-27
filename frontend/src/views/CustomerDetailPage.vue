@@ -85,21 +85,6 @@
               <strong>{{ formatCurrency(customer.last_quarter_revenue) }}</strong>
             </div>
           </div>
-
-          <el-table :data="revenueRecords" class="revenue-table" stripe>
-            <el-table-column prop="month" label="月份" width="120">
-              <template #default="{ row }">
-                {{ formatMonth(row.month) }}
-              </template>
-            </el-table-column>
-            <el-table-column prop="revenue" label="营收">
-              <template #default="{ row }">
-                {{ formatCurrency(row.revenue) }}
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <el-empty v-if="!revenueRecords.length" description="暂无营收数据" />
         </el-card>
 
         <el-card class="stack-card" shadow="never">
@@ -120,6 +105,19 @@
 
         <el-card class="stack-card" shadow="never">
           <template #header>
+            <span>历年营收</span>
+          </template>
+
+          <div
+            v-if="revenueSummary.yearly.length"
+            ref="revenueChartRef"
+            class="revenue-chart"
+          ></div>
+          <el-empty v-else description="暂无历年营收数据" />
+        </el-card>
+
+        <el-card class="stack-card" shadow="never">
+          <template #header>
             <div class="card-header">
               <span>联系人列表</span>
               <el-button type="primary" size="small" @click="handleAddContact">
@@ -130,27 +128,27 @@
           </template>
 
           <el-table :data="contacts" stripe>
-            <el-table-column prop="name" label="姓名" min-width="120" />
-            <el-table-column prop="position" label="职位" min-width="120" />
-            <el-table-column prop="phone" label="电话" min-width="140" />
-            <el-table-column prop="email" label="邮箱" min-width="180" />
-            <el-table-column label="关键人" width="92">
-              <template #default="{ row }">
-                <el-tag :type="row.is_key_person ? 'success' : 'info'">
-                  {{ row.is_key_person ? '是' : '否' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="150" fixed="right">
-              <template #default="{ row }">
-                <el-button type="primary" link @click="handleEditContact(row)">
-                  编辑
-                </el-button>
-                <el-button type="danger" link @click="handleDeleteContact(row.id)">
-                  删除
-                </el-button>
-              </template>
-            </el-table-column>
+              <el-table-column prop="name" label="姓名" min-width="120" />
+              <el-table-column prop="position" label="职位" min-width="120" />
+              <el-table-column prop="phone" label="电话" min-width="140" />
+              <el-table-column prop="email" label="邮箱" min-width="180" />
+              <el-table-column label="关键人" width="92">
+                <template #default="{ row }">
+                  <el-tag :type="row.is_key_person ? 'success' : 'info'">
+                    {{ row.is_key_person ? '是' : '否' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="150" fixed="right">
+                <template #default="{ row }">
+                  <el-button type="primary" link @click="handleEditContact(row)">
+                    编辑
+                  </el-button>
+                  <el-button type="danger" link @click="handleDeleteContact(row.id)">
+                    删除
+                  </el-button>
+                </template>
+              </el-table-column>
           </el-table>
 
           <el-empty v-if="!contacts.length" description="暂无联系人" />
@@ -313,7 +311,7 @@ import { Plus } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { createCustomerAction, deleteCustomer, getCustomer } from '../api/customer'
 import { deleteContact, getContacts } from '../api/contactApi'
-import { createCustomerRevenue, getCustomerRevenues } from '../api/customerRevenue'
+import { createCustomerRevenue, getCustomerRevenueSummary } from '../api/customerRevenue'
 import CustomerDialog from '../components/CustomerDialog.vue'
 import ContactDialog from '../components/ContactDialog.vue'
 
@@ -325,10 +323,15 @@ const customer = ref({})
 const contacts = ref([])
 const chartRef = ref(null)
 const chartInstance = ref(null)
+const revenueChartRef = ref(null)
+const revenueChartInstance = ref(null)
 const formVisible = ref(false)
 const contactFormVisible = ref(false)
 const currentContact = ref(null)
-const revenueRecords = ref([])
+const revenueSummary = ref({
+  yearly: [],
+  monthly: []
+})
 const revenueFormVisible = ref(false)
 const revenueSaving = ref(false)
 const revenueFormRef = ref(null)
@@ -381,13 +384,6 @@ const formatDate = (value) => {
     return '暂无'
   }
   return new Date(value).toLocaleString('zh-CN')
-}
-
-const formatMonth = (value) => {
-  if (!value) {
-    return '暂无'
-  }
-  return String(value).slice(0, 7)
 }
 
 const formatCurrency = (value) => {
@@ -449,6 +445,56 @@ const initChart = () => {
   })
 }
 
+const initRevenueChart = () => {
+  if (!revenueChartRef.value || !revenueSummary.value.yearly.length) {
+    revenueChartInstance.value?.dispose()
+    revenueChartInstance.value = null
+    return
+  }
+
+  revenueChartInstance.value?.dispose()
+  revenueChartInstance.value = echarts.init(revenueChartRef.value)
+  const years = revenueSummary.value.yearly.map((item) => String(item.year))
+  const values = revenueSummary.value.yearly.map((item) => Number(item.revenue || 0))
+
+  revenueChartInstance.value.setOption({
+    grid: {
+      left: 48,
+      right: 16,
+      top: 28,
+      bottom: 36
+    },
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (value) => formatCurrency(value)
+    },
+    xAxis: {
+      type: 'category',
+      data: years,
+      axisTick: { alignWithLabel: true }
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: {
+        formatter: (value) => Number(value).toLocaleString('zh-CN')
+      }
+    },
+    series: [
+      {
+        type: 'bar',
+        name: '年度营收',
+        data: values,
+        barMaxWidth: 42,
+        itemStyle: {
+          color: '#409eff',
+          borderRadius: [4, 4, 0, 0]
+        }
+      }
+    ]
+  })
+
+}
+
 const fetchCustomer = async () => {
   loading.value = true
   try {
@@ -476,18 +522,21 @@ const fetchContacts = async () => {
   }
 }
 
-const fetchRevenueRecords = async () => {
+const fetchRevenueSummary = async () => {
   try {
-    const response = await getCustomerRevenues({
-      customer: route.params.id,
-      page_size: 100,
-      ordering: '-month'
-    })
-    const results = response.data?.results ?? response.data ?? []
-    revenueRecords.value = Array.isArray(results) ? results : []
+    const response = await getCustomerRevenueSummary(route.params.id)
+    revenueSummary.value = {
+      yearly: response.data?.yearly ?? [],
+      monthly: response.data?.monthly ?? []
+    }
+    await nextTick()
+    initRevenueChart()
   } catch (error) {
-    revenueRecords.value = []
-    ElMessage.error('获取营收数据失败')
+    revenueSummary.value = {
+      yearly: [],
+      monthly: []
+    }
+    ElMessage.error('获取历年营收失败')
     console.error(error)
   }
 }
@@ -589,7 +638,7 @@ const handleRevenueSubmit = async () => {
     })
     ElMessage.success('营收保存成功')
     revenueFormVisible.value = false
-    await Promise.all([fetchCustomer(), fetchRevenueRecords()])
+    await Promise.all([fetchCustomer(), fetchRevenueSummary()])
   } catch (error) {
     if (error?.response?.data) {
       ElMessage.error('营收保存失败，请确认客户名称完全匹配')
@@ -620,18 +669,19 @@ watch(
   () => {
     fetchCustomer()
     fetchContacts()
-    fetchRevenueRecords()
+    fetchRevenueSummary()
   }
 )
 
 onMounted(() => {
   fetchCustomer()
   fetchContacts()
-  fetchRevenueRecords()
+  fetchRevenueSummary()
 })
 
 onUnmounted(() => {
   chartInstance.value?.dispose()
+  revenueChartInstance.value?.dispose()
 })
 </script>
 
@@ -671,6 +721,11 @@ onUnmounted(() => {
   height: 360px;
 }
 
+.revenue-chart {
+  width: 100%;
+  height: 260px;
+}
+
 .paragraph {
   margin: 0;
   line-height: 1.7;
@@ -703,7 +758,4 @@ onUnmounted(() => {
   font-size: 18px;
 }
 
-.revenue-table {
-  width: 100%;
-}
 </style>

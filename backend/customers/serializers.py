@@ -173,7 +173,7 @@ class CustomerRevenueSerializer(serializers.ModelSerializer):
         value = (value or '').strip()
         if not value:
             raise serializers.ValidationError('客户名称不能为空')
-        customer = Customer.objects.filter(client_name=value).first()
+        customer = Customer.objects.filter(client_name__iexact=value).first()
         if not customer:
             raise serializers.ValidationError('客户名称未完全匹配 Fishpool 客户，不会添加营收数据')
         self._matched_customer = customer

@@ -4,7 +4,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from io import BytesIO
 import json
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 from .models import Contact, Customer, CustomerRevenue, WeeklyReport, get_last_quarter_range
 
@@ -169,18 +169,9 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertIsNone(report.revise_date)
         self.assertIsNone(report.finish_date)
 
-    def test_create_customer_revenue_requires_exact_customer_name_match(self):
+    def test_create_customer_revenue_matches_customer_name_case_insensitively(self):
         response = self.client.post('/api/customer-revenues/', {
-            'customer_name': self.customer_a.client_name.lower(),
-            'month': '2026-01-01',
-            'revenue': '1000.00',
-        }, format='json')
-
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(CustomerRevenue.objects.count(), 0)
-
-        response = self.client.post('/api/customer-revenues/', {
-            'customer_name': self.customer_a.client_name,
+            'customer_name': self.customer_a.client_name.upper(),
             'month': '2026-01-01',
             'revenue': '1000.00',
         }, format='json')
@@ -207,6 +198,38 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertEqual(CustomerRevenue.objects.count(), 1)
         self.assertEqual(CustomerRevenue.objects.get().customer, self.customer_a)
 
+    def test_import_customer_revenue_reads_all_xlsx_sheets(self):
+        workbook = Workbook()
+        sheet_2021 = workbook.active
+        sheet_2021.title = '2021'
+        sheet_2021.append(['month', 'customer name', 'revenue'])
+        sheet_2021.append(['2021-01', self.customer_a.client_name, 1000])
+
+        sheet_2024 = workbook.create_sheet('2024')
+        sheet_2024.append(['month', 'customer name', 'revenue'])
+        sheet_2024.append(['2024-01', self.customer_a.client_name, 4000])
+        workbook.active = 1
+
+        stream = BytesIO()
+        workbook.save(stream)
+        workbook.close()
+        stream.seek(0)
+        upload = SimpleUploadedFile(
+            'revenues.xlsx',
+            stream.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        response = self.client.post('/api/customer-revenues/import/', {
+            'file': upload,
+        }, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['imported'], 2)
+        self.assertEqual(CustomerRevenue.objects.count(), 2)
+        self.assertTrue(CustomerRevenue.objects.filter(month='2021-01-01', revenue='1000.00').exists())
+        self.assertTrue(CustomerRevenue.objects.filter(month='2024-01-01', revenue='4000.00').exists())
+
     def test_customer_payload_includes_last_year_and_last_quarter_revenue(self):
         today = timezone.localdate()
         last_year_month = today.replace(year=today.year - 1, month=5, day=1)
@@ -229,6 +252,47 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['last_year_revenue'], expected_last_year)
         self.assertEqual(response.data['last_quarter_revenue'], '300.00')
+
+    def test_customer_revenue_summary_groups_monthly_revenue_by_year(self):
+        CustomerRevenue.objects.create(customer=self.customer_a, month='2021-01-01', revenue='1200.00')
+        CustomerRevenue.objects.create(customer=self.customer_a, month='2021-02-01', revenue='1500.00')
+        CustomerRevenue.objects.create(customer=self.customer_a, month='2022-01-01', revenue='1800.00')
+        CustomerRevenue.objects.create(customer=self.customer_b, month='2021-01-01', revenue='9999.00')
+
+        response = self.client.get(f'/api/customers/{self.customer_a.id}/revenue-summary/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['yearly'], [
+            {'year': 2021, 'revenue': '2700.00'},
+            {'year': 2022, 'revenue': '1800.00'},
+        ])
+        self.assertEqual(response.data['monthly'], [
+            {'month': '2021-01', 'revenue': '1200.00'},
+            {'month': '2021-02', 'revenue': '1500.00'},
+            {'month': '2022-01', 'revenue': '1800.00'},
+        ])
+
+    def test_customer_revenue_summary_filters_monthly_rows_by_year(self):
+        CustomerRevenue.objects.create(customer=self.customer_a, month='2021-01-01', revenue='1200.00')
+        CustomerRevenue.objects.create(customer=self.customer_a, month='2022-01-01', revenue='1800.00')
+
+        response = self.client.get(f'/api/customers/{self.customer_a.id}/revenue-summary/', {'year': '2022'})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['yearly'], [
+            {'year': 2021, 'revenue': '1200.00'},
+            {'year': 2022, 'revenue': '1800.00'},
+        ])
+        self.assertEqual(response.data['monthly'], [
+            {'month': '2022-01', 'revenue': '1800.00'},
+        ])
+
+    def test_customer_revenue_summary_returns_empty_arrays_without_revenue(self):
+        response = self.client.get(f'/api/customers/{self.customer_a.id}/revenue-summary/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['yearly'], [])
+        self.assertEqual(response.data['monthly'], [])
 
     def test_export_customers_respects_filters(self):
         response = self.client.get('/api/customers/export/', {'area': self.customer_b.area})

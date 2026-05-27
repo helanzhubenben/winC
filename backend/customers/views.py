@@ -7,7 +7,7 @@ from pathlib import Path
 
 from django.http import HttpResponse
 from django.db.models import Q, Sum
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, ExtractYear
 from django.utils.dateparse import parse_date
 from openpyxl import Workbook, load_workbook
 from rest_framework import viewsets, filters, status
@@ -271,7 +271,7 @@ def _read_csv_revenue_rows(upload):
     return rows
 
 
-def _read_xlsx_revenue_rows(upload):
+def _read_xlsx_revenue_rows_active_sheet(upload):
     workbook = load_workbook(upload, read_only=True, data_only=True)
     sheet = workbook.active
     header_row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
@@ -291,6 +291,43 @@ def _read_xlsx_revenue_rows(upload):
         ))
     workbook.close()
     return rows
+
+
+def _read_xlsx_revenue_rows(upload):
+    workbook = load_workbook(upload, read_only=True, data_only=True)
+    rows = []
+    missing_error = None
+    found_valid_sheet = False
+
+    try:
+        for sheet in workbook.worksheets:
+            header_row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+            if not header_row:
+                continue
+
+            headers = {_normalize_header(name): position for position, name in enumerate(header_row)}
+            missing = REVENUE_REQUIRED_COLUMNS - set(headers.keys())
+            if missing:
+                missing_error = f"缺少字段: {', '.join(sorted(missing))}"
+                continue
+
+            found_valid_sheet = True
+            for index, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+                rows.append((
+                    index,
+                    {
+                        column: values[headers[column]] if headers[column] < len(values) else None
+                        for column in REVENUE_REQUIRED_COLUMNS
+                    }
+                ))
+    finally:
+        workbook.close()
+
+    if found_valid_sheet:
+        return rows
+    if missing_error:
+        raise ValueError(missing_error)
+    raise ValueError('文件缺少表头')
 
 
 def _parse_month(value):
@@ -507,7 +544,7 @@ def _import_customer_and_contact_rows(rows):
                 })
                 warned_customers.add(customer_name)
         else:
-            customer = Customer.objects.filter(client_name=customer_name).first()
+            customer = Customer.objects.filter(client_name__iexact=customer_name).first()
             created = customer is None
             if created:
                 customer = Customer.objects.create(client_name=customer_name, **customer_data)
@@ -753,6 +790,42 @@ class CustomerViewSet(viewsets.ModelViewSet):
         serializer = WeeklyReportListSerializer(reports, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['get'], url_path='revenue-summary')
+    def revenue_summary(self, request, pk=None):
+        """Return yearly revenue totals and monthly revenue rows for the customer."""
+        customer = self.get_object()
+        records = CustomerRevenue.objects.filter(customer=customer)
+
+        yearly = [
+            {
+                'year': item['year'],
+                'revenue': f'{item["total"] or Decimal("0"):.2f}',
+            }
+            for item in records
+            .annotate(year=ExtractYear('month'))
+            .values('year')
+            .annotate(total=Sum('revenue'))
+            .order_by('year')
+        ]
+
+        monthly_records = records.order_by('month')
+        year = _trimmed(request.query_params.get('year'))
+        if year.isdigit():
+            monthly_records = monthly_records.filter(month__year=int(year))
+
+        monthly = [
+            {
+                'month': record.month.strftime('%Y-%m'),
+                'revenue': f'{record.revenue:.2f}',
+            }
+            for record in monthly_records
+        ]
+
+        return Response({
+            'yearly': yearly,
+            'monthly': monthly,
+        })
+
     @action(detail=True, methods=['post'], url_path='create-action')
     def create_action(self, request, pk=None):
         """Create a Weekly Report action from a customer context."""
@@ -883,7 +956,7 @@ class CustomerRevenueViewSet(viewsets.ModelViewSet):
 
         for row_number, row in rows:
             customer_name = (row.get('customer name') or '').strip()
-            customer = Customer.objects.filter(client_name=customer_name).first()
+            customer = Customer.objects.filter(client_name__iexact=customer_name).first()
             if not customer:
                 skipped += 1
                 errors.append({

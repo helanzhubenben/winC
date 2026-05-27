@@ -6,6 +6,10 @@ export function getCustomerRevenues(params) {
   return axios.get(`${API_BASE_URL}/customer-revenues/`, { params })
 }
 
+export function getCustomerRevenueSummary(customerId, params) {
+  return axios.get(`${API_BASE_URL}/customers/${customerId}/revenue-summary/`, { params })
+}
+
 export function createCustomerRevenue(data) {
   return axios.post(`${API_BASE_URL}/customer-revenues/`, data)
 }
