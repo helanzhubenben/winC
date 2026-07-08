@@ -1,8 +1,9 @@
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import Max, Sum
 from django.utils import timezone
 from rest_framework import serializers
+from .locations import normalize_area_text
 from .models import Customer, Contact, CustomerRevenue, WeeklyReport, get_last_quarter_range
 
 
@@ -40,7 +41,15 @@ def _last_year_range():
     return start_date, end_date
 
 
+def _format_revenue_range_label(date_range):
+    """Format the previous-quarter revenue range for the frontend label."""
+    start_date, end_date = date_range
+    quarter = (start_date.month - 1) // 3 + 1
+    return f'{start_date.year}Q{quarter}\uff08{start_date:%Y-%m} \u81f3 {end_date:%Y-%m}\uff09'
+
+
 def _sum_revenue(customer, date_range):
+    """Sum customer revenue records in the given date range."""
     start_date, end_date = date_range
     prefetched = getattr(customer, '_prefetched_objects_cache', {}).get('revenue_records')
     if prefetched is not None:
@@ -57,12 +66,38 @@ def _sum_revenue(customer, date_range):
     return f'{total or Decimal("0"):.2f}'
 
 
+def _latest_contacted_at(customer):
+    """Return the latest contact timestamp for a customer."""
+    latest = getattr(customer, 'latest_contacted_at', None)
+    if latest is not None:
+        return latest
+
+    prefetched = getattr(customer, '_prefetched_objects_cache', {}).get('contact_records')
+    if prefetched is not None:
+        timestamps = [record.contacted_at for record in prefetched]
+        return max(timestamps) if timestamps else None
+
+    return customer.contact_records.aggregate(latest=Max('contacted_at'))['latest']
+
+
+def _has_contacted_today(customer):
+    """Return whether the customer already has a contact record today."""
+    today = timezone.localdate()
+    prefetched = getattr(customer, '_prefetched_objects_cache', {}).get('contact_records')
+    if prefetched is not None:
+        return any(record.contact_date == today for record in prefetched)
+    return customer.contact_records.filter(contact_date=today).exists()
+
+
 class CustomerSerializer(serializers.ModelSerializer):
     """客户序列化器"""
 
     contacts = ContactSerializer(many=True, read_only=True)
     last_year_revenue = serializers.SerializerMethodField()
     last_quarter_revenue = serializers.SerializerMethodField()
+    last_quarter_revenue_label = serializers.SerializerMethodField()
+    last_contacted_at = serializers.SerializerMethodField()
+    contacted_today = serializers.SerializerMethodField()
     # 字段映射以匹配前端
     name = serializers.CharField(source='client_name')
     region = serializers.CharField(source='area')
@@ -93,6 +128,9 @@ class CustomerSerializer(serializers.ModelSerializer):
             'potential_contribution',
             'last_year_revenue',
             'last_quarter_revenue',
+            'last_quarter_revenue_label',
+            'last_contacted_at',
+            'contacted_today',
             'notes',
             'status',
             'created_at',
@@ -107,6 +145,21 @@ class CustomerSerializer(serializers.ModelSerializer):
     def get_last_quarter_revenue(self, obj):
         return _sum_revenue(obj, get_last_quarter_range())
 
+    def get_last_quarter_revenue_label(self, obj):
+        return _format_revenue_range_label(get_last_quarter_range())
+
+    def get_last_contacted_at(self, obj):
+        latest = _latest_contacted_at(obj)
+        return latest.isoformat() if latest else None
+
+    def get_contacted_today(self, obj):
+        return _has_contacted_today(obj)
+
+    def validate(self, attrs):
+        if 'area' in attrs:
+            attrs['area'] = normalize_area_text(attrs.get('area'))
+        return super().validate(attrs)
+
 
 class CustomerListSerializer(serializers.ModelSerializer):
     """客户列表序列化器（简化版）"""
@@ -114,6 +167,9 @@ class CustomerListSerializer(serializers.ModelSerializer):
     contacts_count = serializers.SerializerMethodField()
     last_year_revenue = serializers.SerializerMethodField()
     last_quarter_revenue = serializers.SerializerMethodField()
+    last_quarter_revenue_label = serializers.SerializerMethodField()
+    last_contacted_at = serializers.SerializerMethodField()
+    contacted_today = serializers.SerializerMethodField()
     # 字段映射以匹配前端
     name = serializers.CharField(source='client_name')
     region = serializers.CharField(source='area')
@@ -135,6 +191,9 @@ class CustomerListSerializer(serializers.ModelSerializer):
             'potential_contribution',
             'last_year_revenue',
             'last_quarter_revenue',
+            'last_quarter_revenue_label',
+            'last_contacted_at',
+            'contacted_today',
             'contacts_count',
             'updated_at'
         ]
@@ -147,6 +206,16 @@ class CustomerListSerializer(serializers.ModelSerializer):
 
     def get_last_quarter_revenue(self, obj):
         return _sum_revenue(obj, get_last_quarter_range())
+
+    def get_last_quarter_revenue_label(self, obj):
+        return _format_revenue_range_label(get_last_quarter_range())
+
+    def get_last_contacted_at(self, obj):
+        latest = _latest_contacted_at(obj)
+        return latest.isoformat() if latest else None
+
+    def get_contacted_today(self, obj):
+        return _has_contacted_today(obj)
 
 
 class CustomerRevenueSerializer(serializers.ModelSerializer):

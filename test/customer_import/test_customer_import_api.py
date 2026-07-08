@@ -110,6 +110,39 @@ class CustomerImportApiTests(APITestCase):
         customer = Customer.objects.get(client_name='别名导入客户')
         self.assertEqual(customer.alias, '客户简称A')
 
+    def test_import_normalizes_area_spacing_and_drops_city_suffix_line(self):
+        upload = make_import_upload_with_headers(HEADERS_WITH_ALIAS, [
+            [
+                'Area Normalize Customer',
+                '',
+                'Hunting',
+                'East   Region\nShanghai',
+                'Shanghai',
+                'Test address',
+                'Potential',
+                80,
+                'Competition',
+                70,
+                'Key contact',
+                60,
+                'Strategy',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+                '',
+            ],
+        ])
+
+        response = self.client.post('/api/customers/import/', {'file': upload}, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        customer = Customer.objects.get(client_name='Area Normalize Customer')
+        self.assertEqual(customer.area, 'East Region')
+        self.assertEqual(customer.city, 'Shanghai')
+
     def test_import_creates_customer_contacts_and_keeps_first_duplicate_customer_values(self):
         upload = make_import_upload([
             [
@@ -261,7 +294,7 @@ class CustomerImportApiTests(APITestCase):
         self.assertEqual(customer.business_model, 'Farming')
         self.assertEqual(customer.area, '华南')
         self.assertEqual(customer.city, '广州')
-        self.assertEqual(customer.level, 'B')
+        self.assertEqual(customer.level, 'A')
         self.assertEqual(str(customer.potential_contribution), '88.80')
 
         contact = Contact.objects.get(customer=customer, name='王五')
@@ -307,7 +340,7 @@ class CustomerImportApiTests(APITestCase):
         self.assertEqual(customer.score_x, 0)
         self.assertEqual(customer.score_y, 0)
         self.assertEqual(customer.score_z, 0)
-        self.assertEqual(customer.level, 'D')
+        self.assertEqual(customer.level, 'X')
 
     def test_import_allows_blank_area_and_city(self):
         upload = make_import_upload([

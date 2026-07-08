@@ -25,6 +25,10 @@
               <el-icon><Refresh /></el-icon>
               重置
             </el-button>
+            <el-button @click="handleClearFilterAndSort">
+              <el-icon><Refresh /></el-icon>
+              清除筛选排序
+            </el-button>
             <el-button type="primary" @click="handleSearch">
               <el-icon><Search /></el-icon>
               搜索
@@ -241,6 +245,17 @@
               <strong>{{ customer.potential_contribution || '暂无' }}</strong>
             </div>
 
+            <div class="card-section">
+              <span>上次联系</span>
+              <el-tag
+                :class="{ 'contact-tag-purple': getContactTagType(customer.last_contacted_at) === 'purple' }"
+                :type="getContactTagType(customer.last_contacted_at) === 'purple' ? undefined : getContactTagType(customer.last_contacted_at)"
+                size="small"
+              >
+                {{ formatLastContact(customer.last_contacted_at) }}
+              </el-tag>
+            </div>
+
             <div class="revenue-grid">
               <div>
                 <span>去年营收</span>
@@ -248,6 +263,7 @@
               </div>
               <div>
                 <span>上季度营收</span>
+                <small v-if="customer.last_quarter_revenue_label">{{ customer.last_quarter_revenue_label }}</small>
                 <strong>{{ formatCurrency(customer.last_quarter_revenue) }}</strong>
               </div>
             </div>
@@ -283,16 +299,24 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Delete, Download, Plus, Refresh, Search, Upload } from '@element-plus/icons-vue'
 import { downloadCustomerImportTemplate, getCustomers, importCustomers } from '../api/customer'
 import { importCustomerRevenues } from '../api/customerRevenue'
 import { exportWorkbook } from '../api/export'
+import {
+  clearCustomerListFilterAndSort,
+  getCustomerListStorage,
+  loadCustomerListState,
+  saveCustomerListState
+} from '../utils/customerListState'
 import CustomerDialog from '../components/CustomerDialog.vue'
 
 const router = useRouter()
+const customerListStorage = getCustomerListStorage()
+const savedCustomerListState = loadCustomerListState(customerListStorage)
 const loading = ref(false)
 const customers = ref([])
 const total = ref(0)
@@ -304,11 +328,8 @@ const revenueImporting = ref(false)
 const customerImporting = ref(false)
 const templateDownloading = ref(false)
 const exporting = ref(false)
-const filterConditions = ref([])
-const sortState = ref({
-  field: '',
-  direction: 'desc'
-})
+const filterConditions = ref(savedCustomerListState.filterConditions)
+const sortState = ref(savedCustomerListState.sortState)
 
 const filterFields = [
   { label: '客户名称', value: 'client_name', type: 'text' },
@@ -363,7 +384,8 @@ const choiceOptions = {
     { label: 'Level A', value: 'A' },
     { label: 'Level B', value: 'B' },
     { label: 'Level C', value: 'C' },
-    { label: 'Level D', value: 'D' }
+    { label: 'Level D', value: 'D' },
+    { label: 'Level X', value: 'X' }
   ],
   status: [
     { label: 'Active', value: 'active' },
@@ -371,18 +393,34 @@ const choiceOptions = {
   ]
 }
 
-const searchParams = ref({
-  search: '',
-  page: 1,
-  page_size: 12
+const searchParams = ref(savedCustomerListState.searchParams)
+
+const getCurrentCustomerListState = () => ({
+  searchParams: searchParams.value,
+  filterConditions: filterConditions.value,
+  sortState: sortState.value
 })
+
+const applyCustomerListState = (state) => {
+  searchParams.value = { ...state.searchParams }
+  filterConditions.value = state.filterConditions.map((condition) => ({
+    ...condition,
+    value: Array.isArray(condition.value) ? [...condition.value] : condition.value
+  }))
+  sortState.value = { ...state.sortState }
+}
+
+const persistCustomerListState = () => {
+  saveCustomerListState(customerListStorage, getCurrentCustomerListState())
+}
 
 const getLevelType = (level) => {
   const types = {
     A: 'danger',
     B: 'primary',
     C: 'success',
-    D: 'info'
+    D: 'info',
+    X: 'warning'
   }
   return types[level] || 'info'
 }
@@ -393,6 +431,46 @@ const formatCurrency = (value) => {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   })
+}
+
+const getContactDaysAgo = (value) => {
+  if (!value) {
+    return Number.POSITIVE_INFINITY
+  }
+  const contactedDate = new Date(value)
+  const today = new Date()
+  contactedDate.setHours(0, 0, 0, 0)
+  today.setHours(0, 0, 0, 0)
+  return Math.floor((today - contactedDate) / 86400000)
+}
+
+const getContactTagType = (value) => {
+  const days = getContactDaysAgo(value)
+  if (!Number.isFinite(days) || days > 183) {
+    return 'info'
+  }
+  if (days > 90) {
+    return 'danger'
+  }
+  if (days > 30) {
+    return 'warning'
+  }
+  if (days > 14) {
+    return 'success'
+  }
+  return 'purple'
+}
+
+const formatLastContact = (value) => {
+  if (!value) {
+    return '从未联系'
+  }
+  const days = getContactDaysAgo(value)
+  const dateText = new Date(value).toLocaleDateString('zh-CN')
+  if (days <= 0) {
+    return `${dateText}（今天）`
+  }
+  return `${dateText}（${days} 天前）`
 }
 
 const getFieldConfig = (field) => {
@@ -459,6 +537,7 @@ const buildCustomFilters = () => {
 }
 
 const fetchCustomers = async () => {
+  persistCustomerListState()
   loading.value = true
   try {
     const params = { ...searchParams.value }
@@ -497,6 +576,11 @@ const handleResetFilters = () => {
     field: '',
     direction: 'desc'
   }
+  fetchCustomers()
+}
+
+const handleClearFilterAndSort = () => {
+  applyCustomerListState(clearCustomerListFilterAndSort(getCurrentCustomerListState()))
   fetchCustomers()
 }
 
@@ -621,6 +705,14 @@ const handleCardClick = (id) => {
 onMounted(() => {
   fetchCustomers()
 })
+
+watch(
+  () => [searchParams.value, filterConditions.value, sortState.value],
+  () => {
+    persistCustomerListState()
+  },
+  { deep: true }
+)
 </script>
 
 <style scoped>
@@ -790,9 +882,21 @@ onMounted(() => {
   color: #6b7280;
 }
 
+.revenue-grid small {
+  font-size: 11px;
+  color: #909399;
+  line-height: 1.2;
+}
+
 .revenue-grid strong {
   font-size: 15px;
   color: #111827;
+}
+
+.contact-tag-purple {
+  color: #7e22ce;
+  background-color: #f3e8ff;
+  border-color: #d8b4fe;
 }
 
 .pagination {

@@ -17,6 +17,7 @@ class Customer(models.Model):
         ('B', 'B'),
         ('C', 'C'),
         ('D', 'D'),
+        ('X', 'X'),
     ]
 
     # 基本信息
@@ -107,6 +108,41 @@ class Contact(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.customer.client_name}"
+
+
+class CustomerContactRecord(models.Model):
+    """客户联系时间记录模型"""
+
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.CASCADE,
+        related_name='contact_records',
+        verbose_name='客户'
+    )
+    contacted_at = models.DateTimeField(default=timezone.now, db_index=True, verbose_name='联系时间')
+    contact_date = models.DateField(editable=False, db_index=True, verbose_name='联系日期')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'customer_contact_records'
+        verbose_name = '客户联系记录'
+        verbose_name_plural = '客户联系记录'
+        ordering = ['-contacted_at']
+        constraints = [
+            models.UniqueConstraint(fields=['customer', 'contact_date'], name='unique_customer_contact_per_day')
+        ]
+        indexes = [
+            models.Index(fields=['customer', 'contact_date']),
+            models.Index(fields=['customer', 'contacted_at']),
+        ]
+
+    def save(self, *args, **kwargs):
+        """保存联系记录前按本地时区写入联系日期，用于限制每天只记录一次。"""
+        self.contact_date = timezone.localdate(self.contacted_at)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.customer.client_name} - {timezone.localtime(self.contacted_at):%Y-%m-%d %H:%M:%S}"
 
 
 class CustomerRevenue(models.Model):

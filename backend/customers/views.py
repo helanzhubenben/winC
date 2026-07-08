@@ -6,6 +6,7 @@ from io import BytesIO, StringIO
 from pathlib import Path
 
 from django.http import HttpResponse
+from django.db import IntegrityError
 from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce, ExtractYear
 from django.utils.dateparse import parse_date
@@ -16,7 +17,11 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
-from .models import Customer, Contact, CustomerRevenue, WeeklyReport, get_last_quarter_range
+from .leveling import recalculate_customer_levels
+from .locations import normalize_area_text
+from .models import (
+    Customer, Contact, CustomerContactRecord, CustomerRevenue, WeeklyReport, get_last_quarter_range
+)
 from .serializers import (
     CustomerSerializer, CustomerListSerializer, ContactSerializer,
     CustomerRevenueSerializer, WeeklyReportSerializer, WeeklyReportListSerializer
@@ -449,17 +454,6 @@ def _parse_boolean(row, column):
     raise ValueError(f'{column}必须是 是/否、Y/N、true/false 或 1/0')
 
 
-def _calculate_customer_level(score_x, score_y, score_z):
-    if score_x >= 70 and score_y >= 70 and score_z >= 70:
-        return 'A'
-    high_score_count = sum([score_x >= 70, score_y >= 70, score_z >= 70])
-    if high_score_count >= 2:
-        return 'B'
-    if score_x >= 70:
-        return 'C'
-    return 'D'
-
-
 def _parse_customer_import_row(row):
     business_model = _parse_required_text(row, '业务模式')
     if business_model not in CUSTOMER_IMPORT_BUSINESS_MODELS:
@@ -473,7 +467,7 @@ def _parse_customer_import_row(row):
     customer_data = {
         'alias': _parse_optional_text(row, '别名'),
         'business_model': business_model,
-        'area': _parse_optional_text(row, '区域'),
+        'area': normalize_area_text(row.get('区域')),
         'city': _parse_optional_text(row, '城市'),
         'address': _parse_optional_text(row, '地址'),
         'description_x': _parse_optional_text(row, 'X轴描述'),
@@ -482,7 +476,6 @@ def _parse_customer_import_row(row):
         'score_y': score_y,
         'key_person': _parse_optional_text(row, 'Z轴描述'),
         'score_z': score_z,
-        'level': _calculate_customer_level(score_x, score_y, score_z),
         'client_strategy': _parse_optional_text(row, '客户策略'),
         'potential_contribution': _parse_optional_decimal(row, '潜在贡献'),
         'remark': _parse_optional_text(row, '备注'),
@@ -575,6 +568,8 @@ def _import_customer_and_contact_rows(rows):
             else:
                 contacts_updated += 1
 
+    recalculate_customer_levels()
+
     return {
         'customers_created': customers_created,
         'customers_updated': customers_updated,
@@ -619,15 +614,25 @@ class CustomerViewSet(viewsets.ModelViewSet):
             return CustomerListSerializer
         return CustomerSerializer
 
+    def perform_create(self, serializer):
+        customer = serializer.save()
+        recalculate_customer_levels()
+        customer.refresh_from_db()
+
+    def perform_update(self, serializer):
+        customer = serializer.save()
+        recalculate_customer_levels()
+        customer.refresh_from_db()
+
     def get_queryset(self):
         """优化查询性能"""
         queryset = super().get_queryset()
         queryset = self._apply_custom_filters(queryset)
         queryset = self._annotate_custom_ordering(queryset)
         if self.action == 'list':
-            queryset = queryset.prefetch_related('contacts', 'revenue_records')
+            queryset = queryset.prefetch_related('contacts', 'revenue_records', 'contact_records')
         elif self.action == 'retrieve':
-            queryset = queryset.prefetch_related('contacts', 'revenue_records')
+            queryset = queryset.prefetch_related('contacts', 'revenue_records', 'contact_records')
         return queryset
 
     def _annotate_custom_ordering(self, queryset):
@@ -766,7 +771,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
         }
 
         # 按等级统计
-        for level in ['A', 'B', 'C', 'D']:
+        for level in ['A', 'B', 'C', 'D', 'X']:
             stats['by_level'][level] = queryset.filter(level=level).count()
 
         # 按业务模式统计
@@ -825,6 +830,39 @@ class CustomerViewSet(viewsets.ModelViewSet):
             'yearly': yearly,
             'monthly': monthly,
         })
+
+    @action(detail=True, methods=['post'], url_path='record-contact')
+    def record_contact(self, request, pk=None):
+        """Record one customer contact timestamp; each customer can be recorded once per local day."""
+        customer = self.get_object()
+        now = timezone.now()
+        today = timezone.localdate(now)
+        latest = customer.contact_records.order_by('-contacted_at').first()
+
+        if customer.contact_records.filter(contact_date=today).exists():
+            return Response({
+                'error': '今天已经记录过联系，明天 00:00 后可再次记录',
+                'last_contacted_at': latest.contacted_at.isoformat() if latest else None,
+                'contacted_today': True,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            record = CustomerContactRecord.objects.create(
+                customer=customer,
+                contacted_at=now,
+            )
+        except IntegrityError:
+            return Response({
+                'error': '今天已经记录过联系，明天 00:00 后可再次记录',
+                'last_contacted_at': latest.contacted_at.isoformat() if latest else None,
+                'contacted_today': True,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'id': record.id,
+            'last_contacted_at': record.contacted_at.isoformat(),
+            'contacted_today': record.contact_date == today,
+        }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='create-action')
     def create_action(self, request, pk=None):

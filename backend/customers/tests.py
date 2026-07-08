@@ -6,7 +6,8 @@ from io import BytesIO
 import json
 from openpyxl import Workbook, load_workbook
 
-from .models import Contact, Customer, CustomerRevenue, WeeklyReport, get_last_quarter_range
+from .models import Contact, Customer, CustomerContactRecord, CustomerRevenue, WeeklyReport, get_last_quarter_range
+from .leveling import recalculate_customer_levels
 
 
 class CustomerAndContactApiTests(APITestCase):
@@ -100,6 +101,84 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['results'][0]['name'], self.customer_a.client_name)
         self.assertEqual(response.data['results'][1]['name'], self.customer_b.client_name)
+
+    def test_customer_levels_are_ranked_by_total_score_percentile(self):
+        self.customer_a.delete()
+        self.customer_b.delete()
+        customers = []
+
+        for index in range(20):
+            score = 100 - index
+            customers.append(Customer.objects.create(
+                client_name=f'Ranked Customer {index + 1:02d}',
+                business_model='Hunting',
+                score_x=score,
+                score_y=score,
+                score_z=score,
+            ))
+        zero_score_customer = Customer.objects.create(
+            client_name='Zero Score Customer',
+            business_model='Farming',
+            score_x=0,
+            score_y=100,
+            score_z=100,
+        )
+
+        recalculate_customer_levels()
+
+        levels_by_name = {
+            customer.client_name: customer.level
+            for customer in Customer.objects.all()
+        }
+        self.assertEqual(levels_by_name['Ranked Customer 01'], 'A')
+        self.assertEqual(levels_by_name['Ranked Customer 02'], 'A')
+        self.assertEqual(levels_by_name['Ranked Customer 03'], 'B')
+        self.assertEqual(levels_by_name['Ranked Customer 05'], 'B')
+        self.assertEqual(levels_by_name['Ranked Customer 06'], 'C')
+        self.assertEqual(levels_by_name['Ranked Customer 12'], 'C')
+        self.assertEqual(levels_by_name['Ranked Customer 13'], 'D')
+        self.assertEqual(levels_by_name['Ranked Customer 20'], 'D')
+        self.assertEqual(levels_by_name[zero_score_customer.client_name], 'X')
+
+    def test_customer_update_recalculates_all_customer_levels(self):
+        self.customer_a.score_x = 10
+        self.customer_a.score_y = 10
+        self.customer_a.score_z = 10
+        self.customer_a.save()
+        self.customer_b.score_x = 90
+        self.customer_b.score_y = 90
+        self.customer_b.score_z = 90
+        self.customer_b.save()
+        recalculate_customer_levels()
+
+        response = self.client.patch(f'/api/customers/{self.customer_a.id}/', {
+            'name': self.customer_a.client_name,
+            'business_model': self.customer_a.business_model,
+            'region': self.customer_a.area,
+            'city': self.customer_a.city,
+            'score_x': 100,
+            'score_y': 100,
+            'score_z': 100,
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.customer_a.refresh_from_db()
+        self.customer_b.refresh_from_db()
+        self.assertEqual(self.customer_a.level, 'A')
+        self.assertEqual(self.customer_b.level, 'C')
+
+    def test_customer_update_normalizes_region_spacing_and_drops_city_suffix_line(self):
+        response = self.client.patch(f'/api/customers/{self.customer_a.id}/', {
+            'name': self.customer_a.client_name,
+            'business_model': self.customer_a.business_model,
+            'region': 'North   Region\nTianjing',
+            'city': 'Tianjin',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.customer_a.refresh_from_db()
+        self.assertEqual(self.customer_a.area, 'North Region')
+        self.assertEqual(self.customer_a.city, 'Tianjin')
 
     def test_customer_list_orders_by_computed_revenue_field(self):
         last_quarter_start, _ = get_last_quarter_range(timezone.localdate())
@@ -250,8 +329,32 @@ class CustomerAndContactApiTests(APITestCase):
 
         expected_last_year = '1500.00' if last_quarter_start.year == today.year - 1 else '1200.00'
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        expected_quarter_label = (
+            f'{last_quarter_start.year}Q{(last_quarter_start.month - 1) // 3 + 1}'
+            f'\uFF08{last_quarter_start:%Y-%m} \u81F3 {get_last_quarter_range(today)[1]:%Y-%m}\uFF09'
+        )
         self.assertEqual(response.data['last_year_revenue'], expected_last_year)
         self.assertEqual(response.data['last_quarter_revenue'], '300.00')
+        self.assertEqual(response.data['last_quarter_revenue_label'], expected_quarter_label)
+
+    def test_record_customer_contact_creates_one_record_per_day(self):
+        first_response = self.client.post(f'/api/customers/{self.customer_a.id}/record-contact/')
+
+        self.assertEqual(first_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(CustomerContactRecord.objects.count(), 1)
+        self.assertTrue(first_response.data['contacted_today'])
+
+        detail_response = self.client.get(f'/api/customers/{self.customer_a.id}/')
+
+        self.assertEqual(detail_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(detail_response.data['contacted_today'])
+        self.assertIsNotNone(detail_response.data['last_contacted_at'])
+
+        duplicate_response = self.client.post(f'/api/customers/{self.customer_a.id}/record-contact/')
+
+        self.assertEqual(duplicate_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(CustomerContactRecord.objects.count(), 1)
+        self.assertTrue(duplicate_response.data['contacted_today'])
 
     def test_customer_revenue_summary_groups_monthly_revenue_by_year(self):
         CustomerRevenue.objects.create(customer=self.customer_a, month='2021-01-01', revenue='1200.00')

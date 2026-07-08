@@ -5,6 +5,14 @@
         <span class="page-title">{{ customer.name || '客户详情' }}</span>
       </template>
       <template #extra>
+        <el-button
+          :disabled="customer.contacted_today"
+          :loading="contactRecording"
+          :type="customer.contacted_today ? 'info' : 'success'"
+          @click="handleRecordContact"
+        >
+          {{ customer.contacted_today ? '今日已联系' : '记录联系' }}
+        </el-button>
         <el-button type="primary" @click="handleCreateAction">
           <el-icon><Plus /></el-icon>
           创建 Action
@@ -48,6 +56,14 @@
             <el-descriptions-item :span="2" label="潜在贡献">
               {{ customer.potential_contribution || '暂无' }}
             </el-descriptions-item>
+            <el-descriptions-item :span="2" label="上次联系">
+              <el-tag
+                :class="{ 'contact-tag-purple': getContactTagType(customer.last_contacted_at) === 'purple' }"
+                :type="getContactTagType(customer.last_contacted_at) === 'purple' ? undefined : getContactTagType(customer.last_contacted_at)"
+              >
+                {{ formatLastContact(customer.last_contacted_at) }}
+              </el-tag>
+            </el-descriptions-item>
             <el-descriptions-item :span="2" label="创建时间">
               {{ formatDate(customer.created_at) }}
             </el-descriptions-item>
@@ -82,6 +98,7 @@
             </div>
             <div>
               <span>上季度营收</span>
+              <small v-if="customer.last_quarter_revenue_label">{{ customer.last_quarter_revenue_label }}</small>
               <strong>{{ formatCurrency(customer.last_quarter_revenue) }}</strong>
             </div>
           </div>
@@ -309,7 +326,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
-import { createCustomerAction, deleteCustomer, getCustomer } from '../api/customer'
+import { createCustomerAction, deleteCustomer, getCustomer, recordCustomerContact } from '../api/customer'
 import { deleteContact, getContacts } from '../api/contactApi'
 import { createCustomerRevenue, getCustomerRevenueSummary } from '../api/customerRevenue'
 import CustomerDialog from '../components/CustomerDialog.vue'
@@ -320,6 +337,8 @@ const router = useRouter()
 
 const loading = ref(false)
 const customer = ref({})
+const contactRecording = ref(false)
+const midnightTimer = ref(null)
 const contacts = ref([])
 const chartRef = ref(null)
 const chartInstance = ref(null)
@@ -374,7 +393,8 @@ const getLevelType = (level) => {
     A: 'danger',
     B: 'primary',
     C: 'success',
-    D: 'info'
+    D: 'info',
+    X: 'warning'
   }
   return types[level] || 'info'
 }
@@ -384,6 +404,46 @@ const formatDate = (value) => {
     return '暂无'
   }
   return new Date(value).toLocaleString('zh-CN')
+}
+
+const getContactDaysAgo = (value) => {
+  if (!value) {
+    return Number.POSITIVE_INFINITY
+  }
+  const contactedDate = new Date(value)
+  const today = new Date()
+  contactedDate.setHours(0, 0, 0, 0)
+  today.setHours(0, 0, 0, 0)
+  return Math.floor((today - contactedDate) / 86400000)
+}
+
+const getContactTagType = (value) => {
+  const days = getContactDaysAgo(value)
+  if (!Number.isFinite(days) || days > 183) {
+    return 'info'
+  }
+  if (days > 90) {
+    return 'danger'
+  }
+  if (days > 30) {
+    return 'warning'
+  }
+  if (days > 14) {
+    return 'success'
+  }
+  return 'purple'
+}
+
+const formatLastContact = (value) => {
+  if (!value) {
+    return '从未联系'
+  }
+  const days = getContactDaysAgo(value)
+  const dateText = new Date(value).toLocaleString('zh-CN')
+  if (days <= 0) {
+    return `${dateText}（今天）`
+  }
+  return `${dateText}（${days} 天前）`
 }
 
 const formatCurrency = (value) => {
@@ -399,6 +459,27 @@ const formatLocalDate = (value = new Date()) => {
   const month = String(value.getMonth() + 1).padStart(2, '0')
   const day = String(value.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+const scheduleMidnightActivation = () => {
+  if (midnightTimer.value) {
+    window.clearTimeout(midnightTimer.value)
+    midnightTimer.value = null
+  }
+  if (!customer.value.contacted_today) {
+    return
+  }
+  const now = new Date()
+  const nextMidnight = new Date(now)
+  nextMidnight.setDate(now.getDate() + 1)
+  nextMidnight.setHours(0, 0, 0, 0)
+  midnightTimer.value = window.setTimeout(() => {
+    customer.value = {
+      ...customer.value,
+      contacted_today: false
+    }
+    midnightTimer.value = null
+  }, nextMidnight.getTime() - now.getTime())
 }
 
 const initChart = () => {
@@ -500,6 +581,7 @@ const fetchCustomer = async () => {
   try {
     const response = await getCustomer(route.params.id)
     customer.value = response.data ?? {}
+    scheduleMidnightActivation()
     await nextTick()
     initChart()
   } catch (error) {
@@ -568,6 +650,44 @@ const resetActionForm = () => {
 const handleCreateAction = () => {
   resetActionForm()
   actionFormVisible.value = true
+}
+
+const handleRecordContact = async () => {
+  if (customer.value.contacted_today) {
+    return
+  }
+  try {
+    await ElMessageBox.confirm('确认记录一次当前客户联系时间吗？今天记录后按钮会禁用到明天 00:00。', '确认联系记录', {
+      type: 'warning',
+      confirmButtonText: '确认记录',
+      cancelButtonText: '取消'
+    })
+    contactRecording.value = true
+    const response = await recordCustomerContact(route.params.id)
+    customer.value = {
+      ...customer.value,
+      last_contacted_at: response.data?.last_contacted_at,
+      contacted_today: response.data?.contacted_today ?? true
+    }
+    scheduleMidnightActivation()
+    ElMessage.success('联系时间已记录')
+  } catch (error) {
+    if (error !== 'cancel') {
+      const message = error?.response?.data?.error || '记录联系失败'
+      ElMessage.error(message)
+      if (error?.response?.data?.last_contacted_at) {
+        customer.value = {
+          ...customer.value,
+          last_contacted_at: error.response.data.last_contacted_at,
+          contacted_today: true
+        }
+        scheduleMidnightActivation()
+      }
+      console.error(error)
+    }
+  } finally {
+    contactRecording.value = false
+  }
 }
 
 const handleActionSubmit = async () => {
@@ -680,6 +800,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (midnightTimer.value) {
+    window.clearTimeout(midnightTimer.value)
+  }
   chartInstance.value?.dispose()
   revenueChartInstance.value?.dispose()
 })
@@ -753,9 +876,22 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
+.revenue-summary small {
+  display: block;
+  margin-bottom: 4px;
+  color: #909399;
+  font-size: 12px;
+}
+
 .revenue-summary strong {
   color: #111827;
   font-size: 18px;
+}
+
+.contact-tag-purple {
+  color: #7e22ce;
+  background-color: #f3e8ff;
+  border-color: #d8b4fe;
 }
 
 </style>

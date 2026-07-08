@@ -160,7 +160,8 @@ const getLevelType = (level) => {
     A: 'danger',
     B: 'primary',
     C: 'success',
-    D: 'info'
+    D: 'info',
+    X: 'warning'
   }
   return types[level] || 'info'
 }

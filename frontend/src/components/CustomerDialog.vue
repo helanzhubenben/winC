@@ -178,9 +178,10 @@ const levelType = computed(() => {
     A: 'danger',
     B: 'primary',
     C: 'success',
-    D: 'info'
+    D: 'info',
+    X: 'warning'
   }
-  return types[currentLevel.value] || 'info'
+  return types[currentLevel.value] || 'warning'
 })
 
 watch(
@@ -210,10 +211,7 @@ const handleSubmit = async () => {
     await formRef.value.validate()
     loading.value = true
 
-    const payload = {
-      ...formData.value,
-      level: currentLevel.value
-    }
+    const payload = { ...formData.value }
 
     if (isEdit.value) {
       await updateCustomer(props.customer.id, payload)

@@ -163,9 +163,10 @@ const levelType = computed(() => {
     A: 'danger',
     B: 'primary',
     C: 'success',
-    D: 'info'
+    D: 'info',
+    X: 'warning'
   }
-  return types[currentLevel.value]
+  return types[currentLevel.value] || 'warning'
 })
 
 // 监听customer变化，更新表单数据
@@ -208,10 +209,7 @@ const handleSubmit = async () => {
     await formRef.value.validate()
     loading.value = true
 
-    const data = {
-      ...formData.value,
-      level: currentLevel.value
-    }
+    const data = { ...formData.value }
 
     if (isEdit.value) {
       await updateCustomer(props.customer.id, data)

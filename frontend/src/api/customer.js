@@ -34,6 +34,10 @@ export function createCustomerAction(id, data) {
   return axios.post(`${API_BASE_URL}/customers/${id}/create-action/`, data)
 }
 
+export function recordCustomerContact(id) {
+  return axios.post(`${API_BASE_URL}/customers/${id}/record-contact/`)
+}
+
 // 获取客户详情
 export function getCustomer(id) {
   return axios.get(`${API_BASE_URL}/customers/${id}/`)

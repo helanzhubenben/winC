@@ -1,33 +1,18 @@
 /**
  * 计算客户等级
- * Level A: X>=70 AND Y>=70 AND Z>=70
- * Level B: 至少两项>=70
- * Level C: X>=70
- * Level D: 其他
+ * 客户等级由后端按所有客户三维总分排名后统一计算。
+ * 前端只能预判三维有 0 分时为 X，否则保存后自动排名。
  */
 export function calculateLevel(scoreX, scoreY, scoreZ) {
   const x = Number(scoreX) || 0
   const y = Number(scoreY) || 0
   const z = Number(scoreZ) || 0
 
-  // Level A: 三项都>=70
-  if (x >= 70 && y >= 70 && z >= 70) {
-    return 'A'
+  if ([x, y, z].some((score) => score === 0)) {
+    return 'X'
   }
 
-  // Level B: 至少两项>=70
-  const highScoreCount = [x >= 70, y >= 70, z >= 70].filter(Boolean).length
-  if (highScoreCount >= 2) {
-    return 'B'
-  }
-
-  // Level C: X>=70
-  if (x >= 70) {
-    return 'C'
-  }
-
-  // Level D: 其他
-  return 'D'
+  return '保存后自动排名'
 }
 
 /**
@@ -38,7 +23,8 @@ export function getLevelColor(level) {
     A: '#F56C6C',  // 红色
     B: '#409EFF',  // 蓝色
     C: '#67C23A',  // 绿色
-    D: '#909399'   // 灰色
+    D: '#909399',  // 灰色
+    X: '#E6A23C'   // 橙色
   }
   return colors[level] || colors.D
 }
