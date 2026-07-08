@@ -63,4 +63,4 @@ revenue_import_test_template.xlsx
 .runtime/fishpool-export-test.xlsx
 config/mcporter.json
 
-.codex/config.toml
+.codex
