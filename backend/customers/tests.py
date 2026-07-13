@@ -2,6 +2,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
+from datetime import timedelta
 from io import BytesIO
 import json
 from openpyxl import Workbook, load_workbook
@@ -24,6 +25,13 @@ class CustomerAndContactApiTests(APITestCase):
             area='华北',
             city='北京',
         )
+
+    def _set_customer_updated_at_to_past(self, customer):
+        """将客户更新时间回拨到过去，便于断言后续操作会刷新更新时间。"""
+        past_time = timezone.now() - timedelta(days=1)
+        Customer.objects.filter(id=customer.id).update(updated_at=past_time)
+        customer.refresh_from_db()
+        return customer.updated_at
 
     def test_customer_list_filters_by_area(self):
         response = self.client.get('/api/customers/', {'area': '华北'})
@@ -101,6 +109,39 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['results'][0]['name'], self.customer_a.client_name)
         self.assertEqual(response.data['results'][1]['name'], self.customer_b.client_name)
+
+    def test_contact_create_update_and_delete_refresh_customer_updated_at(self):
+        old_updated_at = self._set_customer_updated_at_to_past(self.customer_a)
+
+        create_response = self.client.post('/api/contacts/', {
+            'customer': self.customer_a.id,
+            'name': 'Contact A',
+            'position': 'Manager',
+            'phone': '',
+            'email': '',
+            'is_key_person': False,
+        }, format='json')
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        self.customer_a.refresh_from_db()
+        self.assertGreater(self.customer_a.updated_at, old_updated_at)
+
+        old_updated_at = self._set_customer_updated_at_to_past(self.customer_a)
+        contact_id = create_response.data['id']
+        update_response = self.client.patch(f'/api/contacts/{contact_id}/', {
+            'position': 'Director',
+        }, format='json')
+
+        self.assertEqual(update_response.status_code, status.HTTP_200_OK)
+        self.customer_a.refresh_from_db()
+        self.assertGreater(self.customer_a.updated_at, old_updated_at)
+
+        old_updated_at = self._set_customer_updated_at_to_past(self.customer_a)
+        delete_response = self.client.delete(f'/api/contacts/{contact_id}/')
+
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.customer_a.refresh_from_db()
+        self.assertGreater(self.customer_a.updated_at, old_updated_at)
 
     def test_customer_levels_are_ranked_by_total_score_percentile(self):
         self.customer_a.delete()
@@ -338,11 +379,14 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertEqual(response.data['last_quarter_revenue_label'], expected_quarter_label)
 
     def test_record_customer_contact_creates_one_record_per_day(self):
+        old_updated_at = self._set_customer_updated_at_to_past(self.customer_a)
         first_response = self.client.post(f'/api/customers/{self.customer_a.id}/record-contact/')
 
         self.assertEqual(first_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(CustomerContactRecord.objects.count(), 1)
         self.assertTrue(first_response.data['contacted_today'])
+        self.customer_a.refresh_from_db()
+        self.assertGreater(self.customer_a.updated_at, old_updated_at)
 
         detail_response = self.client.get(f'/api/customers/{self.customer_a.id}/')
 
@@ -355,6 +399,21 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertEqual(duplicate_response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(CustomerContactRecord.objects.count(), 1)
         self.assertTrue(duplicate_response.data['contacted_today'])
+
+    def test_create_action_refreshes_customer_updated_at(self):
+        old_updated_at = self._set_customer_updated_at_to_past(self.customer_a)
+
+        response = self.client.post(f'/api/customers/{self.customer_a.id}/create-action/', {
+            'definition': 'Follow up project',
+            'action': 'Called customer',
+            'tasks': 'Follow up',
+            'due_date': '',
+            'responsibility': 'Sales',
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.customer_a.refresh_from_db()
+        self.assertGreater(self.customer_a.updated_at, old_updated_at)
 
     def test_customer_revenue_summary_groups_monthly_revenue_by_year(self):
         CustomerRevenue.objects.create(customer=self.customer_a, month='2021-01-01', revenue='1200.00')

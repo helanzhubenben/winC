@@ -78,6 +78,13 @@ CUSTOMER_FILTER_FIELDS = {
 }
 
 
+def _touch_customer_updated_at(customer_or_id):
+    """刷新客户主表更新时间，用于反映联系人、联系记录和 Action 等客户相关活动。"""
+    customer_id = getattr(customer_or_id, 'id', customer_or_id)
+    if customer_id:
+        Customer.objects.filter(id=customer_id).update(updated_at=timezone.now())
+
+
 def _xlsx_response(workbook, filename):
     output = BytesIO()
     workbook.save(output)
@@ -858,6 +865,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 'contacted_today': True,
             }, status=status.HTTP_400_BAD_REQUEST)
 
+        _touch_customer_updated_at(customer.id)
         return Response({
             'id': record.id,
             'last_contacted_at': record.contacted_at.isoformat(),
@@ -903,6 +911,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         report = serializer.save()
+        _touch_customer_updated_at(customer.id)
         return Response(WeeklyReportSerializer(report).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['get'], url_path='export')
@@ -958,6 +967,25 @@ class ContactViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """优化查询性能"""
         return super().get_queryset().select_related('customer')
+
+    def perform_create(self, serializer):
+        """联系人新增后刷新关联客户更新时间。"""
+        contact = serializer.save()
+        _touch_customer_updated_at(contact.customer_id)
+
+    def perform_update(self, serializer):
+        """联系人编辑后刷新原关联客户和新关联客户更新时间。"""
+        previous_customer_id = serializer.instance.customer_id
+        contact = serializer.save()
+        _touch_customer_updated_at(previous_customer_id)
+        if contact.customer_id != previous_customer_id:
+            _touch_customer_updated_at(contact.customer_id)
+
+    def perform_destroy(self, instance):
+        """联系人删除后刷新关联客户更新时间。"""
+        customer_id = instance.customer_id
+        instance.delete()
+        _touch_customer_updated_at(customer_id)
 
 
 class CustomerRevenueViewSet(viewsets.ModelViewSet):
@@ -1068,6 +1096,25 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    def perform_create(self, serializer):
+        """Weekly Report 新增后刷新关联客户更新时间。"""
+        report = serializer.save()
+        _touch_customer_updated_at(report.customer_id)
+
+    def perform_update(self, serializer):
+        """Weekly Report 编辑后刷新原关联客户和新关联客户更新时间。"""
+        previous_customer_id = serializer.instance.customer_id
+        report = serializer.save()
+        _touch_customer_updated_at(previous_customer_id)
+        if report.customer_id != previous_customer_id:
+            _touch_customer_updated_at(report.customer_id)
+
+    def perform_destroy(self, instance):
+        """Weekly Report 删除后刷新关联客户更新时间。"""
+        customer_id = instance.customer_id
+        instance.delete()
+        _touch_customer_updated_at(customer_id)
+
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
         queryset = self.filter_queryset(self.get_queryset().select_related('customer'))
@@ -1125,6 +1172,7 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
                 report.actions = []
             report.actions.append(action_record)
             report.save()
+            _touch_customer_updated_at(report.customer_id)
 
             # 返回新创建的记录（带 id）
             new_action = {
@@ -1172,6 +1220,7 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
                 'next_step': next_step
             })
             report.save()
+            _touch_customer_updated_at(report.customer_id)
 
             # 返回更新后的记录
             updated_action = {
@@ -1184,6 +1233,7 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
             # 删除行动记录
             report.actions.pop(action_id)
             report.save()
+            _touch_customer_updated_at(report.customer_id)
             return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['post'], url_path='add-action')
@@ -1219,6 +1269,7 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
             report.actions = []
         report.actions.append(action_record)
         report.save()
+        _touch_customer_updated_at(report.customer_id)
 
         serializer = self.get_serializer(report)
         return Response(serializer.data)
@@ -1263,6 +1314,7 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
             'user': user
         })
         report.save()
+        _touch_customer_updated_at(report.customer_id)
 
         serializer = self.get_serializer(report)
         return Response(serializer.data)
@@ -1288,6 +1340,7 @@ class WeeklyReportViewSet(viewsets.ModelViewSet):
         # 删除行动记录
         report.actions.pop(index)
         report.save()
+        _touch_customer_updated_at(report.customer_id)
 
         serializer = self.get_serializer(report)
         return Response(serializer.data)
