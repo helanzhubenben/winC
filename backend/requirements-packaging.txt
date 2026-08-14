@@ -1,0 +1,2 @@
+# Build-only dependencies for producing the Windows distributable.
+PyInstaller==6.16.0

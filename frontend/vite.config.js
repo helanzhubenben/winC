@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: '/static/frontend/',
   plugins: [vue()],
   esbuild: {
     logOverride: { 'this-is-undefined-in-esm': 'silent' }
@@ -11,6 +12,10 @@ export default defineConfig({
     esbuildOptions: {
       target: 'es2020'
     }
+  },
+  build: {
+    outDir: '../backend/static/frontend',
+    emptyOutDir: true
   },
   server: {
     proxy: {

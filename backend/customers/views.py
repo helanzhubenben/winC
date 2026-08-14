@@ -19,6 +19,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from .leveling import recalculate_customer_levels
 from .locations import normalize_area_text
+from fishpool.runtime import get_resource_directory
 from .models import (
     Customer, Contact, CustomerContactRecord, CustomerRevenue, WeeklyReport, get_last_quarter_range
 )
@@ -97,7 +98,8 @@ def _xlsx_response(workbook, filename):
 
 
 def _repo_root():
-    return Path(__file__).resolve().parents[2]
+    """返回源码或打包资源所在的项目根目录。"""
+    return get_resource_directory()
 
 
 def _customer_import_template_path():

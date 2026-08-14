@@ -53,6 +53,12 @@ yarn-error.log*
 # 前端构建产物
 frontend/dist/
 frontend/.vite/
+backend/static/frontend/
+backend/templates/fishpool/index.html
+
+# Windows package build products
+packaging/build/
+packaging/dist/
 
 # 操作系统
 .DS_Store

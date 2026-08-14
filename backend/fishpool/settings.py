@@ -4,18 +4,20 @@ Django settings for fishpool project.
 
 from pathlib import Path
 import os
+import sys
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
-
+from .runtime import get_data_directory
+from .runtime import get_resource_directory
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-your-secret-key-here-change-in-production'
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-ALLOWED_HOSTS = ['*']
+# Packaged Fishpool only serves the local machine; source development keeps the
+# existing permissive settings for the Vite development proxy.
+PACKAGED_RUNTIME = os.environ.get('FISHPOOL_PACKAGED') == '1' or getattr(sys, 'frozen', False)
+BASE_DIR = get_resource_directory() if PACKAGED_RUNTIME else Path(__file__).resolve().parent.parent
+DEBUG = not PACKAGED_RUNTIME
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost'] if PACKAGED_RUNTIME else ['*']
 
 
 # Application definition
@@ -44,12 +46,15 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+if PACKAGED_RUNTIME:
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
+
 ROOT_URLCONF = 'fishpool.urls'
 
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -65,11 +70,15 @@ TEMPLATES = [
 WSGI_APPLICATION = 'fishpool.wsgi.application'
 
 
-# Database
+# The source checkout keeps its existing local database. Packaged Fishpool
+# stores data outside its installation directory for safe upgrades.
+DATA_DIR = get_data_directory() if PACKAGED_RUNTIME else BASE_DIR
+if PACKAGED_RUNTIME:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': DATA_DIR / 'db.sqlite3',
     }
 }
 
@@ -120,13 +129,19 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_DIRS = [BASE_DIR / 'static'] if PACKAGED_RUNTIME else []
+STORAGES = {
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 # CORS settings
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = not PACKAGED_RUNTIME
 CORS_ALLOW_CREDENTIALS = True
 
 
