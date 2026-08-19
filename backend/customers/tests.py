@@ -1,3 +1,5 @@
+"""客户、联系人、营收与周报 REST API 的回归测试。"""
+
 from rest_framework import status
 from rest_framework.test import APITestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -39,6 +41,46 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 1)
         self.assertEqual(response.data['results'][0]['name'], self.customer_b.client_name)
+
+    def test_customer_name_matches_returns_trimmed_case_insensitive_exact_matches(self):
+        """名称匹配接口只返回去除首尾空格后的精确同名客户。"""
+        matching_customer = Customer.objects.create(
+            client_name='AREA A CUSTOMER',
+            alias='Existing alias',
+            business_model='Farming',
+            area='华南',
+            city='深圳',
+        )
+
+        response = self.client.get('/api/customers/name-matches/', {'name': '  area a customer  '})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['matches'], [
+            {
+                'id': self.customer_a.id,
+                'name': self.customer_a.client_name,
+                'alias': self.customer_a.alias,
+                'region': self.customer_a.area,
+                'city': self.customer_a.city,
+            },
+            {
+                'id': matching_customer.id,
+                'name': matching_customer.client_name,
+                'alias': matching_customer.alias,
+                'region': matching_customer.area,
+                'city': matching_customer.city,
+            },
+        ])
+
+    def test_customer_name_matches_returns_empty_results_for_blank_or_partial_names(self):
+        """名称匹配接口不将空值或部分名称视为重名。"""
+        blank_response = self.client.get('/api/customers/name-matches/', {'name': '   '})
+        partial_response = self.client.get('/api/customers/name-matches/', {'name': 'Area A'})
+
+        self.assertEqual(blank_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(blank_response.data['matches'], [])
+        self.assertEqual(partial_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(partial_response.data['matches'], [])
 
     def test_customer_list_applies_custom_text_choice_and_number_filters(self):
         self.customer_a.alias = 'Alpha'

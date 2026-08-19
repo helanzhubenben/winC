@@ -1,3 +1,4 @@
+<!-- 新建及编辑客户的表单弹窗，包含客户名称重复提示。 -->
 <template>
   <el-dialog
     :model-value="visible"
@@ -11,6 +12,20 @@
         <el-col :span="12">
           <el-form-item label="客户名称" prop="name">
             <el-input v-model="formData.name" placeholder="请输入客户名称" />
+            <el-alert
+              v-if="nameMatches.length"
+              class="name-match-alert"
+              title="已存在同名客户"
+              type="warning"
+              :closable="false"
+              show-icon
+            >
+              <template #default>
+                <div v-for="customer in nameMatches" :key="customer.id">
+                  {{ formatMatchedCustomer(customer) }}
+                </div>
+              </template>
+            </el-alert>
           </el-form-item>
         </el-col>
         <el-col :span="12">
@@ -117,9 +132,9 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { createCustomer, updateCustomer } from '../api/customer'
+import { createCustomer, getCustomerNameMatches, updateCustomer } from '../api/customer'
 import { calculateLevel } from '../utils/level'
 
 const emptyForm = () => ({
@@ -156,6 +171,9 @@ const emit = defineEmits(['update:visible', 'success'])
 const formRef = ref(null)
 const loading = ref(false)
 const formData = ref(emptyForm())
+const nameMatches = ref([])
+let nameMatchTimer = null
+let nameMatchRequestId = 0
 
 const rules = {
   name: [{ required: true, message: '请输入客户名称', trigger: 'blur' }],
@@ -192,12 +210,66 @@ watch(
     }
 
     formData.value = customer ? { ...emptyForm(), ...customer } : emptyForm()
+    resetNameMatches()
   },
   { immediate: true }
 )
 
+watch(
+  () => formData.value.name,
+  (name) => {
+    if (!props.visible || isEdit.value) {
+      resetNameMatches()
+      return
+    }
+    queueNameMatchCheck(name)
+  }
+)
+
+// 格式化同名客户的名称和已有基础信息。
+const formatMatchedCustomer = (customer) => {
+  const location = [customer.region, customer.city].filter(Boolean).join(' / ')
+  const alias = customer.alias ? `（别名：${customer.alias}）` : ''
+  return `${customer.name}${alias}${location ? `（${location}）` : ''}`
+}
+
+// 清空待执行查询和当前重名提示。
+const resetNameMatches = () => {
+  nameMatchRequestId += 1
+  if (nameMatchTimer) {
+    clearTimeout(nameMatchTimer)
+    nameMatchTimer = null
+  }
+  nameMatches.value = []
+}
+
+// 在用户停止输入后查询同名客户，减少不必要的网络请求。
+const queueNameMatchCheck = (name) => {
+  resetNameMatches()
+  const trimmedName = name.trim()
+  if (!trimmedName) {
+    return
+  }
+
+  const requestId = nameMatchRequestId
+  nameMatchTimer = setTimeout(async () => {
+    try {
+      const response = await getCustomerNameMatches(trimmedName)
+      if (requestId !== nameMatchRequestId) {
+        return
+      }
+      nameMatches.value = response.data.matches || []
+    } catch {
+      if (requestId === nameMatchRequestId) {
+        nameMatches.value = []
+      }
+    }
+  }, 300)
+}
+
 const resetForm = () => {
   formData.value = emptyForm()
+  resetNameMatches()
   formRef.value?.clearValidate()
 }
 
@@ -231,4 +303,14 @@ const handleSubmit = async () => {
     loading.value = false
   }
 }
+
+onBeforeUnmount(() => {
+  resetNameMatches()
+})
 </script>
+
+<style scoped>
+.name-match-alert {
+  margin-top: 8px;
+}
+</style>

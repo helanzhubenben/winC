@@ -1,3 +1,5 @@
+"""客户、联系人、营收与周报相关的 REST API 视图。"""
+
 import csv
 import json
 from datetime import date, datetime
@@ -766,6 +768,33 @@ class CustomerViewSet(viewsets.ModelViewSet):
         if operator == 'eq':
             return queryset.filter(**{f'{field}__date': parsed})
         return queryset.filter(**{f'{field}__date__gte': parsed})
+
+    @action(detail=False, methods=['get'], url_path='name-matches')
+    def name_matches(self, request):
+        """返回与输入名称精确匹配的客户，用于新建客户时的重名提示。"""
+        name = _trimmed(request.query_params.get('name'))
+        if not name:
+            return Response({'matches': []})
+
+        matches = Customer.objects.filter(client_name__iexact=name).order_by('id').values(
+            'id',
+            'client_name',
+            'alias',
+            'area',
+            'city',
+        )
+        return Response({
+            'matches': [
+                {
+                    'id': customer['id'],
+                    'name': customer['client_name'],
+                    'alias': customer['alias'],
+                    'region': customer['area'],
+                    'city': customer['city'],
+                }
+                for customer in matches
+            ]
+        })
 
     @action(detail=False, methods=['get'])
     def statistics(self, request):

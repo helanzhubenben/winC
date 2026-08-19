@@ -1,3 +1,4 @@
+// 客户资源 REST API 请求封装。
 import axios from 'axios'
 
 const API_BASE_URL = '/api'
@@ -5,6 +6,13 @@ const API_BASE_URL = '/api'
 // 获取客户列表（支持筛选、搜索、分页）
 export function getCustomers(params) {
   return axios.get(`${API_BASE_URL}/customers/`, { params })
+}
+
+// 精确查询同名客户，为新建客户时的重复提示提供数据。
+export function getCustomerNameMatches(name) {
+  return axios.get(`${API_BASE_URL}/customers/name-matches/`, {
+    params: { name }
+  })
 }
 
 export function exportCustomers(params) {
