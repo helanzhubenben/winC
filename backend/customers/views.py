@@ -196,22 +196,22 @@ def _add_weekly_reports_sheet(workbook, queryset=None):
     sheet = workbook.active if workbook.sheetnames == ['Sheet'] else workbook.create_sheet('周报')
     sheet.title = '周报'
     sheet.append([
+        '状态',
         '客户名称',
         '匹配客户',
         '区域',
         '地址',
         '任务',
         '项目定义',
-        '状态',
         '到期日期',
         '修订日期',
-        '完成日期',
         '营收',
+        'Action内容',
         '责任人',
+        '完成日期',
         '备注',
         'Action序号',
         'Action日期',
-        'Action内容',
         'Action结果',
         'Action下一步',
         'Action用户',
@@ -225,22 +225,22 @@ def _add_weekly_reports_sheet(workbook, queryset=None):
         for index, action in enumerate(actions, start=1):
             action_content = _action_value(action, 'action') or _action_value(action, 'content')
             sheet.append([
+                '已完成' if report.status == 'completed' else '进行中',
                 report.client_name,
                 report.customer.client_name if report.customer else '',
                 report.area,
                 report.address,
                 report.tasks,
                 report.definition,
-                '已完成' if report.status == 'completed' else '进行中',
                 _format_export_date(report.due_date),
                 _format_export_date(report.revise_date),
-                _format_export_date(report.finish_date),
                 report.revenue,
+                action_content,
                 report.responsibility,
+                _format_export_date(report.finish_date),
                 report.remark,
                 index if action else '',
                 _action_value(action, 'action_date'),
-                action_content,
                 _action_value(action, 'result'),
                 _action_value(action, 'next_step'),
                 _action_value(action, 'user'),
@@ -1050,6 +1050,7 @@ class CustomerRevenueViewSet(viewsets.ModelViewSet):
         updated = 0
         skipped = 0
         errors = []
+        monthly_totals = {}
 
         for row_number, row in rows:
             customer_name = (row.get('customer name') or '').strip()
@@ -1075,10 +1076,20 @@ class CustomerRevenueViewSet(viewsets.ModelViewSet):
                 })
                 continue
 
+            key = (customer.id, month)
+            if key not in monthly_totals:
+                monthly_totals[key] = {
+                    'customer': customer,
+                    'month': month,
+                    'revenue': Decimal('0'),
+                }
+            monthly_totals[key]['revenue'] += revenue
+
+        for monthly_total in monthly_totals.values():
             _, created = CustomerRevenue.objects.update_or_create(
-                customer=customer,
-                month=month,
-                defaults={'revenue': revenue}
+                customer=monthly_total['customer'],
+                month=monthly_total['month'],
+                defaults={'revenue': monthly_total['revenue']}
             )
             if created:
                 imported += 1

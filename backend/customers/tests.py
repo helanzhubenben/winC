@@ -5,6 +5,7 @@ from rest_framework.test import APITestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from datetime import timedelta
+from decimal import Decimal
 from io import BytesIO
 import json
 from openpyxl import Workbook, load_workbook
@@ -360,6 +361,49 @@ class CustomerAndContactApiTests(APITestCase):
         self.assertEqual(CustomerRevenue.objects.count(), 1)
         self.assertEqual(CustomerRevenue.objects.get().customer, self.customer_a)
 
+    def test_import_customer_revenue_sums_duplicate_customer_month_rows(self):
+        """同一导入文件中同一客户同月的多行营收应合并求和。"""
+        csv_content = (
+            'month,customer name,revenue\n'
+            f'2026-01,{self.customer_a.client_name},1000.25\n'
+            f'2026-01-15,{self.customer_a.client_name},250.75\n'
+        ).encode('utf-8')
+        upload = SimpleUploadedFile('revenues.csv', csv_content, content_type='text/csv')
+
+        response = self.client.post('/api/customer-revenues/import/', {
+            'file': upload,
+        }, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['imported'], 1)
+        self.assertEqual(response.data['updated'], 0)
+        self.assertEqual(CustomerRevenue.objects.count(), 1)
+        self.assertEqual(CustomerRevenue.objects.get().revenue, Decimal('1251.00'))
+
+    def test_reimport_duplicate_customer_month_rows_replaces_month_total(self):
+        """重复导入相同文件应覆盖月度汇总值，而不是在数据库原值上再次累加。"""
+        CustomerRevenue.objects.create(
+            customer=self.customer_a,
+            month='2026-01-01',
+            revenue='9999.00',
+        )
+        csv_content = (
+            'month,customer name,revenue\n'
+            f'2026-01,{self.customer_a.client_name},1000\n'
+            f'2026-01,{self.customer_a.client_name},250\n'
+        ).encode('utf-8')
+        upload = SimpleUploadedFile('revenues.csv', csv_content, content_type='text/csv')
+
+        response = self.client.post('/api/customer-revenues/import/', {
+            'file': upload,
+        }, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['imported'], 0)
+        self.assertEqual(response.data['updated'], 1)
+        self.assertEqual(CustomerRevenue.objects.count(), 1)
+        self.assertEqual(CustomerRevenue.objects.get().revenue, Decimal('1250.00'))
+
     def test_import_customer_revenue_reads_all_xlsx_sheets(self):
         workbook = Workbook()
         sheet_2021 = workbook.active
@@ -547,10 +591,10 @@ class CustomerAndContactApiTests(APITestCase):
         rows = list(workbook.active.iter_rows(values_only=True))
         workbook.close()
 
-        self.assertEqual(rows[0][0], '客户名称')
+        self.assertEqual(rows[0][0], '状态')
         self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[1][0], self.customer_b.client_name)
-        self.assertEqual(rows[1][6], '已完成')
+        self.assertEqual(rows[1][0], '已完成')
+        self.assertEqual(rows[1][1], self.customer_b.client_name)
 
     def test_export_workbook_contains_customers_and_weekly_report_actions(self):
         WeeklyReport.objects.create(
@@ -561,6 +605,8 @@ class CustomerAndContactApiTests(APITestCase):
             tasks='Task A',
             definition='Definition A',
             responsibility='Tester A',
+            finish_date='2026-04-03',
+            remark='Report remark',
             status='in_progress',
             actions=[
                 {
@@ -599,7 +645,20 @@ class CustomerAndContactApiTests(APITestCase):
 
         self.assertEqual(customer_rows[0][0], '客户名称')
         self.assertEqual(len(customer_rows), 3)
-        self.assertEqual(weekly_rows[0][15], 'Action内容')
+        self.assertEqual(weekly_rows[0][0], '状态')
+        self.assertEqual(weekly_rows[0][10:17], (
+            'Action内容',
+            '责任人',
+            '完成日期',
+            '备注',
+            'Action序号',
+            'Action日期',
+            'Action结果',
+        ))
         self.assertEqual(len(weekly_rows), 3)
-        self.assertEqual(weekly_rows[1][15], 'First action')
-        self.assertEqual(weekly_rows[2][15], 'Second action')
+        self.assertEqual(weekly_rows[1][10], 'First action')
+        self.assertEqual(weekly_rows[2][10], 'Second action')
+        self.assertEqual(
+            weekly_rows[1][11:17],
+            ('Tester A', '2026-04-03', 'Report remark', 1, '2026-04-01', 'First result'),
+        )
